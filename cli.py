@@ -58,6 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "plot":
         out = plot_lightcurve(args.config)
         print(f"Saved: {out}")
+        return 0
 
     return 0
 

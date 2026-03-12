@@ -72,7 +72,7 @@ def _should_stop(tau: np.ndarray | None, last_tau: np.ndarray | None, steps_done
     return rel_change < cfg.convergence_tol
 
 
-def _initialize_walkers(fit: FitConfig, rng: np.random.Generator) -> np.ndarray:
+def _initialize_walkers(fit: FitConfig) -> np.ndarray:
     """Fast, vectorized walker init with simple bounds.
 
     - Finite bounds: draw uniformly in [low, high].
@@ -95,9 +95,9 @@ def _initialize_walkers(fit: FitConfig, rng: np.random.Generator) -> np.ndarray:
         for j in range(d):
             low, high = lows[j], highs[j]
             if np.isfinite(low) and np.isfinite(high):
-                X[:, j] = rng.uniform(low, high, size=m)
+                X[:, j] = np.random.uniform(low, high, size=m)
             else:
-                X[:, j] = rng.normal(centers[j], widths[j], size=m)
+                X[:, j] = np.random.normal(centers[j], widths[j], size=m)
         return X
 
     need = fit.n_walkers
@@ -179,8 +179,8 @@ def fit(config_path: str | Path) -> Results:
         return (lp, *blob) if fit_config.blobs else lp
 
     # Initialize walkers around starts with Gaussian scatter
-    rng = np.random.default_rng(fit_config.seed)
-    p0 = _initialize_walkers(fit_config, rng)
+    np.random.seed(fit_config.seed)  # for any non-NumPy code that uses global seed
+    p0 = _initialize_walkers(fit_config)
 
     # Run sampler (scalar lnprob)
     n_dim = fit_config.n_param
@@ -196,13 +196,25 @@ def fit(config_path: str | Path) -> Results:
     max_steps = fit_config.n_steps
     state = sampler.run_mcmc(p0, fit_config.check_interval, progress=False)
     steps_done = fit_config.check_interval
-    last_tau = None
+    last_tau = np.inf
     while steps_done < max_steps:
         run = min(fit_config.check_interval, max_steps - steps_done)
         if steps_done > 2 * fit_config.burn_in:
             tau = sampler.get_autocorr_time(tol=0, discard=fit_config.burn_in)
-            print("\rN_eff =", int(steps_done / tau.max()), end="", flush=True)
+            rel_err = (np.abs(tau - last_tau) / tau).max()
+
+            window = 500
+            chain = sampler.get_chain()[-(window+1):]
+            accepted = np.any(chain[1:] != chain[:-1], axis=2)
+            rolling_af = np.mean(accepted)
+
+            print("\r"+event_cfg.get("name")+">",
+                  f" N/tau= {steps_done / tau.max():4.0f};",
+                  f" relerr= {rel_err:.1%};",
+                  f" acc= {rolling_af:.1%} ",
+                  end="", flush=True)
             if _should_stop(tau, last_tau, steps_done, fit_config):
+                print()
                 break
             if tau is not None and np.isfinite(tau).all():
                 last_tau = tau
