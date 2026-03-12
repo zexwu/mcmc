@@ -50,11 +50,6 @@ class FitConfig:
         self._fit_order = list(self.step.keys())
 
     @property
-    def parameters_to_fit(self) -> List[str]:
-        return self._fit_order
-
-    # concise aliases
-    @property
     def free(self) -> List[str]:
         return self._fit_order
 

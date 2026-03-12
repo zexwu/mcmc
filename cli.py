@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 
 from .sampler import fit
+from .lc import plot_lightcurve
 
 
 def _fmt_pm(m: float, p16: float, p84: float) -> str:
@@ -35,6 +36,9 @@ def main(argv: list[str] | None = None) -> int:
     r = sp.add_parser("run", help="Run MCMC from TOML config")
     r.add_argument("config", help="Path to conf.toml")
 
+    r = sp.add_parser("plot", help="Plot lightcurve from TOML config")
+    r.add_argument("config", help="Path to conf.toml")
+
     args = p.parse_args(argv)
     if args.cmd == "run":
         res = fit(args.config)
@@ -50,6 +54,10 @@ def main(argv: list[str] | None = None) -> int:
         for key, val in lines:
             print(f"{key:<{w_key}} = {val:>{w_val}}")
         return 0
+
+    if args.cmd == "plot":
+        out = plot_lightcurve(args.config)
+        print(f"Saved: {out}")
 
     return 0
 

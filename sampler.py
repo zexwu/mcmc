@@ -201,7 +201,7 @@ def fit(config_path: str | Path) -> Results:
         run = min(fit_config.check_interval, max_steps - steps_done)
         if steps_done > 2 * fit_config.burn_in:
             tau = sampler.get_autocorr_time(tol=0, discard=fit_config.burn_in)
-            print(steps_done / fit_config.min_tau_mult, [round(float(x), 1) for x in tau])
+            print("\rN_eff =", int(steps_done / tau.max()), end="", flush=True)
             if _should_stop(tau, last_tau, steps_done, fit_config):
                 break
             if tau is not None and np.isfinite(tau).all():
