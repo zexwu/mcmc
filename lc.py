@@ -208,10 +208,13 @@ def plot_lightcurve(config_path: str | Path) -> Path:
     axd["B"].set_ylim((mm * 5, -mm * 5) if mm * 5 > 0.05 else (0.06, -0.06))
 
     # Labels, title, legend
-    axd["A"].set_ylabel("$I$ mag")
     axd["E"].set_ylabel("$I$ mag")
+    axd["A"].set_ylabel("$I$ mag")
     axd["B"].set_ylabel("Residual")
     axd["B"].set_xlabel("HJD - 2450000")
+    axd["A"].sharex(axd["B"])
+    axd["A"].tick_params(axis="x", which="both", bottom=False, labelbottom=False)
+    axd["A"].margins(x=0)
 
     ev_name = event_cfg.get("name") or event_cfg.get("id") or "Light Curve"
     blend_flags = "".join("1" if ds.blending else "0" for ds in phot)
@@ -224,7 +227,7 @@ def plot_lightcurve(config_path: str | Path) -> Path:
     else:
         axd["E"].legend(ncol=2, loc="upper left")
 
-    fig = axd["E"].figure
+    fig.align_labels()
     fig.tight_layout()
     outfile = out_dir / "lc.png"
     fig.savefig(outfile, dpi=200, bbox_inches="tight")

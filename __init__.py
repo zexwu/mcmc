@@ -1,4 +1,4 @@
-from .sampler import fit, Results
+from .sampler import fit
 
-__all__ = ["fit", "Results"]
+__all__ = ["fit"]
 

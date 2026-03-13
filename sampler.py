@@ -214,13 +214,13 @@ def fit(config_path: str | Path) -> Results:
                   f" acc= {rolling_af:.1%} ",
                   end="", flush=True)
             if _should_stop(tau, last_tau, steps_done, fit_config):
-                print()
                 break
             if tau is not None and np.isfinite(tau).all():
                 last_tau = tau
         state = sampler.run_mcmc(state, run, progress=False)
         steps_done += run
 
+    print("\n")
     # flatten with burn-in and thinning
     burn = fit_config.burn_in
     thin = max(1, fit_config.thin)
