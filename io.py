@@ -11,7 +11,7 @@ import numpy as np
 @dataclass
 class PhotDataset:
     """Single dataset descriptor with time-series arrays."""
-    dataset: str
+    label: str
     filename: str
     filter: str | None
     blending: bool
@@ -57,7 +57,7 @@ def load_photometry(cfg: dict, mask: Callable[[np.ndarray], np.ndarray] | None =
 
     phot: list[PhotDataset] = []
     for ent in cfg.get("phot", []):
-        name = ent.get("dataset", ent.get("filename"))
+        name = ent.get("label", ent.get("filename"))
         fname = ent["filename"]
         filt = ent.get("filter")
         blend = bool(ent.get("blending", False))
@@ -69,5 +69,5 @@ def load_photometry(cfg: dict, mask: Callable[[np.ndarray], np.ndarray] | None =
         raw = load_photometry_file(str(fpath), subtract_jd=subtract_jd, jd_offset=jd_offset)
         raw[:, 2] = np.sqrt(raw[:, 2] ** 2 + err_floor**2) * err_scale
         data = _apply_mask(raw, mask_rows)
-        phot.append(PhotDataset(dataset=name, filename=fname, filter=filt, blending=blend, data=data, flux=mag_to_flux(data)))
+        phot.append(PhotDataset(label=name, filename=fname, filter=filt, blending=blend, data=data, flux=mag_to_flux(data)))
     return phot

@@ -17,15 +17,15 @@ _BLOB_LAYOUT_CACHE: Dict[Tuple[Tuple[str, ...], Tuple[str, ...]], Tuple[List[int
 
 
 def _get_blob_layout(blob_names: Sequence[str], datasets: List[PhotDataset]) -> Tuple[List[int], List[int], int]:
-    key = (tuple(blob_names), tuple(ds.dataset for ds in datasets))
+    key = (tuple(blob_names), tuple(ds.label for ds in datasets))
     if key in _BLOB_LAYOUT_CACHE:
         return _BLOB_LAYOUT_CACHE[key]
     name_to_idx = {n: i for i, n in enumerate(blob_names)}
     fs_pos = [-1] * len(datasets)
     fb_pos = [-1] * len(datasets)
     for i, ds in enumerate(datasets):
-        fs_name = f"fs_{ds.dataset}"
-        fb_name = f"fb_{ds.dataset}"
+        fs_name = f"fs_{ds.label}"
+        fb_name = f"fb_{ds.label}"
         if fs_name in name_to_idx:
             fs_pos[i] = name_to_idx[fs_name]
         if fb_name in name_to_idx:

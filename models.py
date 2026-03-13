@@ -8,6 +8,7 @@ Numba is optional; falls back to pure NumPy.
 """
 from __future__ import annotations
 
+from typing import Tuple, Dict
 import numpy as np
 from numpy.typing import NDArray
 
@@ -180,27 +181,81 @@ class PSPL(Parallax):
     Inherits geometry and parallax trajectory from Parallax; adds the PSPL
     magnification calculation.
     """
-    def magnification(self, t, param, dataset_id: int = -1):
+
+    @staticmethod
+    def normalize(param: Dict) -> Dict:
+        param = param.copy()
+        param["tE"] = param.get("tE", abs(param["teff"] / param["u0"]))
+        param["pi1"] = param.get("pi1", 0.0)
+        param["pi2"] = param.get("pi2", 0.0)
+
+        return param
+
+    def north_east(self, param: Dict) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+        # direction of piE source -> lens
+        piEN, piEE = param["pi1"], param["pi2"]  # parallax components in EN frame
+        piE = np.hypot(piEN, piEE)
+        if piE == 0.0:
+            return (np.nan, np.nan), (np.nan, np.nan)
+
+        Phi_pi = np.arctan2(piEE, piEN) # PA of the \mu_LS
+
+        # partial (tau, u) / partial qn -> North
+        tau_north, u_north = piEN / piE, -piEE / piE
+
+        # partial (tau, u) / partial qe -> East
+        tau_east, u_east = piEE / piE, piEN / piE
+        return (tau_north, u_north), (tau_east, u_east)
+
+    def trajectory(self, t: NDArray, param: Dict, dataset_id: int = -1) -> Tuple[NDArray, NDArray]:
+        param = self.normalize(param)
+        t0, u0, tE = param["t0"], param["u0"], param["tE"]
+        piEN, piEE = param["pi1"], param["pi2"]  # parallax components in EN frame
+
+        tau = (t - t0) / tE
+        u = u0
+
+        if (piEN * piEN + piEE * piEE) > 0.0:
+            qn, qe = self.get_parallax_components(t, t0, dataset_id)
+            tau += qn * piEN + qe * piEE
+            u += -qn * piEE + qe * piEN
+
+        return tau, u
+
+    def magnification(self, t: NDArray, param: Dict, dataset_id: int = -1) -> NDArray:
         """Compute PSPL magnification for times t and parameter dict.
 
         Expected keys in param: t0, u0, and either tE or (teff,u0).
         Optional parallax vector components: pi1, pi2.
         """
-        t0 = param["t0"]
-        u0 = param["u0"]
-        tE = param.get("tE", abs(param["teff"] / u0))
-        tau = (t - t0) / tE
-        u = u0
-        piEN = param.get("pi1", 0.0)
-        piEE = param.get("pi2", 0.0)
-        if (piEN * piEN + piEE * piEE) > 0.0:
-            qn, qe = self.get_parallax_components(t, t0, dataset_id)
-            tau += qn * piEN + qe * piEE
-            u += -qn * piEE + qe * piEN
+
+        tau, u = self.trajectory(t, param, dataset_id)
+
         u_sq = tau * tau + u * u
         u_sq_p4 = u_sq + 4.0
+
         return (u_sq + 2.0) / np.sqrt(u_sq * u_sq_p4)
 
+
+    def images(self, t: NDArray, param: Dict, thetaE: float = 1, dataset_id: int = -1):
+        """Compute PSPL major-to-minor vectors (x, y, eta) in u, v plane for times t and parameter dict."""
+        taup, up = self.trajectory(t, param, dataset_id)
+        u_sq = taup * taup + up * up
+        u_sq_p4 = u_sq + 4.0
+        A = (u_sq + 2.0) / np.sqrt(u_sq * u_sq_p4)
+        eta = (A-1) / (A+1)
+        sep = (eta ** 0.25 + eta ** -0.25) # image separation in thetaE units
+
+        (tau_north, u_north), (tau_east, u_east) = self.north_east(param)
+
+        # tau, u -> north, east
+        det = tau_east * u_north - tau_north * u_east
+        ue = ( u_north * taup - tau_north * up) / det   # east
+        un = (-u_east  * taup + tau_east  * up) / det   # north
+
+        # source position -> major-to-minor vector
+        dn, de = - sep * un / u_sq ** 0.5, - sep * ue / u_sq ** 0.5
+        return dn * thetaE, de * thetaE, eta
 
 
 class PSBL(Parallax):
@@ -222,7 +277,7 @@ class PSBL(Parallax):
         vbbl.RelTol = rel_tol
 
     @staticmethod
-    def normalize(param: dict) -> dict:
+    def normalize(param: Dict) -> Dict:
         param = param.copy()
         param["rho"] = param.get("rho", 10 ** param.get("logrho", -6))
         param["q"] = param.get("q", 10 ** param.get("logq", -4))
@@ -230,7 +285,7 @@ class PSBL(Parallax):
         param["tE"] = param.get("tE", abs(param["teff"] / param["u0"]))
         return param
 
-    def trajectory(self, t: NDArray, param: dict, dataset_id: int = -1) -> tuple[NDArray, NDArray]:
+    def trajectory(self, t: NDArray, param: Dict, dataset_id: int = -1) -> Tuple[NDArray, NDArray]:
         ''' Source Position (y1, y2) relative to Binary-Lens c.o.m. '''
 
         t0, u0, tE = param["t0"], param["u0"], param["tE"]
@@ -251,7 +306,7 @@ class PSBL(Parallax):
 
         return y1, y2
 
-    def north_east(self, param: dict) -> tuple[tuple[NDArray, NDArray], tuple[NDArray, NDArray]]:
+    def north_east(self, param: Dict) -> Tuple[Tuple[float, float], Tuple[float, float]]:
         # direction of piE source -> lens
         piEN, piEE = param["pi1"], param["pi2"]  # parallax components in EN frame
         alpha = param["alpha"]  # radians
@@ -274,10 +329,19 @@ class PSBL(Parallax):
         return (y1_north, y2_north), (y1_east, y2_east)
 
 
-    def magnification(self, t: NDArray, param: dict, dataset_id: int = -1) -> NDArray:
+    def magnification(self, t: NDArray, param: Dict, dataset_id: int = -1) -> NDArray:
         param = self.normalize(param)
         s, q = param["s"], param["q"]
         rho = param["rho"]
         y1, y2 = self.trajectory(t, param, dataset_id)
 
         return np.array(vbbl.BinaryMag2_vec(s, q, y1, y2, rho))
+
+
+
+if __name__ == "__main__":
+    coord = "17:31:42.61 -30:46:17.04"
+    model = PSPL(*coord.split())
+    t = np.array([10096])
+    param = {"t0": 10097.7070, "u0": 0.68033, "teff": 48.4662, "pi1": 0.0799, "pi2": -0.0632}
+    print(model.images(t, param))

@@ -9,14 +9,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
 
+from numpy.typing import NDArray
 import toml
 import emcee
 import numpy as np
 
 from .config import FitConfig, build_fit_config
-from .io import load_photometry
+from .io import PhotDataset, load_photometry
 from .likelihood import log_likelihood
-from .models import PSPL, PSBL
+from .models import PSPL, PSBL, Parallax
 from multiprocessing import Pool
 
 
@@ -126,9 +127,13 @@ def _write_csv_with_metadata(path: Path, header: List[str], data: np.ndarray, me
 
 
 # scalar log-prob with emcee-supported blob tuples
-def lnprob(theta, phot, model, fit_config):
+def lnprob(theta: NDArray, phot: List[PhotDataset], model: type[Parallax], fit_config: FitConfig):
     p = dict(zip(fit_config.free, theta))
     p.update(fit_config.param_fix)
+
+    if fit_config.t_ref:
+        p["t_ref"] = np.asarray(fit_config.t_ref)
+
     # flat prior with optional bounds
     null = -np.inf, *tuple(np.nan for _ in fit_config.blob_names)
     for name, b in fit_config.bounds.items():

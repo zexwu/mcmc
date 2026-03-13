@@ -154,7 +154,7 @@ def plot_lightcurve(config_path: str | Path) -> Path:
         mag_data = _flux_to_mag(flux_rescaled)
         mag_model_rescaled = _flux_to_mag(np.column_stack([t, mag_model * fs_ref + fb_ref, np.zeros_like(t)]))
 
-        color, zorder = _get_color(ds.dataset, i)
+        color, zorder = _get_color(ds.label, i)
 
         errorbar_kwargs = dict(fmt="o", ms=4, capsize=0, fillstyle="none", mew=1.5, c=color, zorder=zorder, alpha=0.7)
         for key in ("A", "E"):
@@ -162,7 +162,7 @@ def plot_lightcurve(config_path: str | Path) -> Path:
                 mag_data[:, 0],
                 mag_data[:, 1],
                 yerr=np.abs(mag_data[:, 2]),
-                label=ds.dataset if key == "E" else None,
+                label=ds.label if key == "E" else None,
                 **errorbar_kwargs,
             )
 
@@ -212,8 +212,7 @@ def plot_lightcurve(config_path: str | Path) -> Path:
     axd["B"].set_ylabel("Residual")
     axd["B"].set_xlabel("HJD $-$ 2450000")
     axd["A"].sharex(axd["B"])
-    axd["A"].tick_params(axis="x", which="both", bottom=False, labelbottom=False)
-    axd["A"].margins(x=0)
+    axd["A"].tick_params(axis="x", which="both", bottom=True, labelbottom=False)
 
     ev_name = event_cfg.get("name") or event_cfg.get("id") or "Light Curve"
     blend_flags = "".join("1" if ds.blending else "0" for ds in phot)
@@ -228,6 +227,10 @@ def plot_lightcurve(config_path: str | Path) -> Path:
 
     fig.align_labels()
     fig.tight_layout()
+
+    pos = axd["B"].get_position()
+    axd["B"].set_position([pos.x0, pos.y0 + 0.05, pos.width, pos.height])
+
     outfile = out_dir / "lc.png"
     fig.savefig(outfile, dpi=200, bbox_inches="tight")
     return outfile
