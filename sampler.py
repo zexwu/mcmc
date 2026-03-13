@@ -9,14 +9,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
 
+import toml
 import emcee
 import numpy as np
 
 from .config import FitConfig, build_fit_config
-from .io import read_config, load_photometry
+from .io import load_photometry
 from .likelihood import log_likelihood
-from .models import PSPL
-
+from .models import PSPL, PSBL
+from multiprocessing import Pool
 
 
 @dataclass
@@ -42,21 +43,6 @@ class Results:
             out[name] = {"p16": float(q[0, i]), "median": float(q[1, i]), "p84": float(q[2, i])}
         out["chi2_best"] = {"value": float(self.best.get("chi2", np.nan))}
         return out
-
-
-def _theta_to_params(theta: np.ndarray, fit: FitConfig) -> List[Dict[str, float]]:
-    """Map theta rows to parameter dicts, merging fixed values and tE derivation."""
-    names = fit.free
-    theta = np.atleast_2d(theta)
-    params_list: List[Dict[str, float]] = []
-    for i in range(theta.shape[0]):
-        p: Dict[str, float] = dict(fit.param_fix)
-        for j, name in enumerate(names):
-            p[name] = float(theta[i, j])
-        if "teff" in p and "u0" in p:
-            p["tE"] = abs(p["teff"] / p["u0"])
-        params_list.append(p)
-    return params_list
 
 
 def _should_stop(tau: np.ndarray | None, last_tau: np.ndarray | None, steps_done: int, cfg: FitConfig) -> bool:
@@ -139,6 +125,24 @@ def _write_csv_with_metadata(path: Path, header: List[str], data: np.ndarray, me
         np.savetxt(f, data, delimiter=",", fmt="%.8g")
 
 
+# scalar log-prob with emcee-supported blob tuples
+def lnprob(theta, phot, model, fit_config):
+    p = dict(zip(fit_config.free, theta))
+    p.update(fit_config.param_fix)
+    # flat prior with optional bounds
+    null = -np.inf, *tuple(np.nan for _ in fit_config.blob_names)
+    for name, b in fit_config.bounds.items():
+        if b is None:
+            continue
+        if not (b[0] <= p[name] <= b[1]):
+            if fit_config.blob_names: return null
+            return -np.inf
+    # also pass bounds into likelihood for internal checking
+    ll, blob = log_likelihood(p, phot, model, fit_config.blob_names)
+    lp = ll / fit_config.temperature
+    return (lp, *blob) if fit_config.blob_names else lp
+
+
 def fit(config_path: str | Path) -> Results:
     """Run emcee on a configuration file and return Results.
 
@@ -146,7 +150,7 @@ def fit(config_path: str | Path) -> Results:
     the TOML schema and examples.
     """
     # Load configuration and data
-    cfg, base_dir = read_config(config_path)
+    cfg = toml.load(config_path)
     phot = load_photometry(cfg)
 
     # Build model and precompute parallax
@@ -154,69 +158,58 @@ def fit(config_path: str | Path) -> Results:
     coords = event_cfg.get("coords", "").split()
     if len(coords) != 2:
         raise ValueError("event.coords must be 'RA DEC' string, e.g. '17:31:42.61 -30:46:17.04'")
-    model = PSPL(*coords)
-    model.precalculate_parallax([ds.data[:, 0] for ds in phot])
 
     # Fit configuration
     fit_config = build_fit_config(cfg)
 
-    # scalar log-prob with emcee-supported blob tuples
-    def lnprob(theta):
-        p = _theta_to_params(np.asarray(theta)[None, :], fit_config)[0]
-        p["t_ref"] = np.asarray(fit_config.t_ref)
-        # flat prior with optional bounds
-        null = -np.inf, *tuple(np.nan for _ in fit_config.blobs)
-        for name, b in fit_config.bounds.items():
-            if b is None or name not in p:
-                continue
-            if not (b[0] <= p[name] <= b[1]):
-                if fit_config.blobs:
-                    return null
-                return -np.inf
-        # also pass bounds into likelihood for internal checking
-        ll, blob = log_likelihood(p, phot, model, fit_config.blobs)
-        lp = ll / fit_config.temperature
-        return (lp, *blob) if fit_config.blobs else lp
+    model = globals()[fit_config.model](*coords)
+    model.precalculate_parallax([ds.data[:, 0] for ds in phot])
 
     # Initialize walkers around starts with Gaussian scatter
     np.random.seed(fit_config.seed)  # for any non-NumPy code that uses global seed
     p0 = _initialize_walkers(fit_config)
 
     # Run sampler (scalar lnprob)
-    n_dim = fit_config.n_param
-    blob_dtype = [(name, float) for name in fit_config.blobs] if fit_config.blobs else None
+    blob_dtype = [(name, float) for name in fit_config.blob_names] if fit_config.blob_names else None
     sampler = emcee.EnsembleSampler(
         fit_config.n_walkers,
-        n_dim,
+        fit_config.n_param,
         lnprob,
+        args=(phot, model, fit_config),
         blobs_dtype=blob_dtype,
         moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
+        pool=Pool(fit_config.n_processes)
     )
 
     max_steps = fit_config.n_steps
-    state = sampler.run_mcmc(p0, fit_config.check_interval, progress=False)
+    state = sampler.run_mcmc(p0, fit_config.check_interval)
     steps_done = fit_config.check_interval
     last_tau = np.inf
     while steps_done < max_steps:
         run = min(fit_config.check_interval, max_steps - steps_done)
-        if steps_done > 2 * fit_config.burn_in:
-            tau = sampler.get_autocorr_time(tol=0, discard=fit_config.burn_in)
-            rel_err = (np.abs(tau - last_tau) / tau).max()
+        discard = max(0, steps_done - 10 * fit_config.check_interval)
 
-            window = 500
-            chain = sampler.get_chain()[-(window+1):]
-            accepted = np.any(chain[1:] != chain[:-1], axis=2)
-            rolling_af = np.mean(accepted)
+        tau = sampler.get_autocorr_time(tol=0, discard=discard)
+        tau = np.clip(tau, 1e-8, None)
+        rel_err = (np.abs(tau - last_tau) / tau).max()
 
-            print("\r"+event_cfg.get("name")+">",
-                  f" N/tau= {steps_done / tau.max():4.0f};",
-                  f" relerr= {rel_err:.1%};",
-                  f" acc= {rolling_af:.1%} ",
-                  end="", flush=True)
-            if _should_stop(tau, last_tau, steps_done, fit_config):
-                break
-            if tau is not None and np.isfinite(tau).all():
-                last_tau = tau
+        window = fit_config.check_interval
+        chain = sampler.get_chain()[-(window+1):]
+        accepted = np.any(chain[1:] != chain[:-1], axis=2)
+        rolling_af = np.mean(accepted)
+
+        print("\r"+event_cfg.get("name")+">",
+                f" N= {steps_done};",
+                f" tau= {tau.astype(int)};",
+                f" N/tau= {steps_done / tau.max():4.0f};",
+                f" relerr= {rel_err:.1%};",
+                f" acc= {rolling_af:.1%} ",
+                end="", flush=True)
+        if _should_stop(tau, last_tau, steps_done, fit_config):
+            break
+        if tau is not None and np.isfinite(tau).all():
+            last_tau = tau
+
         state = sampler.run_mcmc(state, run, progress=False)
         steps_done += run
 
@@ -235,10 +228,8 @@ def fit(config_path: str | Path) -> Results:
     logp_flat = logp.reshape(W * S)
 
     blob_dict: Dict[str, np.ndarray] = {}
-    if fit_config.blobs and blobs is not None:
-        for bn in fit_config.blobs:
-            b = blobs[bn].reshape(W * S)
-            blob_dict[bn] = np.asarray(b)
+    for bn in fit_config.blob_names:
+        blob_dict[bn] = blobs[bn].reshape(W * S)
 
     # best row
     idx_best = int(np.argmax(logp_flat))
@@ -249,14 +240,14 @@ def fit(config_path: str | Path) -> Results:
 
     # write outputs
     out_dir = Path(cfg.get("paths").get("output"))
-    out_cfg = cfg.get("mcmc", {}).get("output", {})
+    out_cfg = cfg.get("mcmc", {}).get("outputs", {})
     chain_file = out_dir / out_cfg.get("chain_file")
     best_file = out_dir / out_cfg.get("best_file")
 
-    header = ["chi2", *names, *fit_config.blobs]
+    header = ["chi2", *names, *fit_config.blob_names]
     chi2_all = -2.0 * logp_flat * fit_config.temperature
     data_cols = [chi2_all, *[samples[:, i] for i in range(samples.shape[1])]]
-    for bn in fit_config.blobs:
+    for bn in fit_config.blob_names:
         data_cols.append(blob_dict.get(bn, np.full_like(logp_flat, np.nan)))
     data_all = np.column_stack(data_cols)
 
@@ -268,7 +259,12 @@ def fit(config_path: str | Path) -> Results:
 
     _write_csv_with_metadata(chain_file, header, data_all, metadata)
     # best: single row
-    best_row = np.array([[best["chi2"], *[best[n] for n in names], *[np.nan for _ in fit_config.blobs]]])
+    best_row = data_all[idx_best]  # keep as 2D for consistent writing
+    # add fixed parameters to results
+    for par in fit_config.fixed:
+        header.append(par)
+        best_row = np.insert(best_row, header.index(par), fit_config.param_fix[par])
+    best_row = np.atleast_2d(best_row)
     _write_csv_with_metadata(best_file, header, best_row, metadata)
 
     return Results(samples=samples, log_prob=logp_flat, blobs=blob_dict, param_names=names, best=best)

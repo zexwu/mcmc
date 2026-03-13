@@ -1,10 +1,15 @@
-"""PSPL model with simple Earth-parallax terms.
+"""Microlensing models and utilities.
+
+- Parallax: computes projected Earth parallax components for a given source.
+- PSPL: point-source point-lens magnification with optional parallax.
+- PSBL: point-source binary-lens magnification via VBBinaryLensing.BinaryMag2.
 
 Numba is optional; falls back to pure NumPy.
 """
 from __future__ import annotations
 
 import numpy as np
+from numpy.typing import NDArray
 
 try:
     from numba import njit as _njit
@@ -13,6 +18,9 @@ except Exception:  # pragma: no cover
         if func is None:
             return lambda f: f
         return func
+
+from . import VBBinaryLensing as _VBB
+vbbl = _VBB.VBBinaryLensing()
 
 
 ECCENTRICITY = 0.0167
@@ -55,11 +63,15 @@ def hms_dms_to_deg(ra_str, dec_str):
     dec_deg = sign * (dec_d + dec_m / 60.0 + dec_s / 3600.0)
     return ra_deg, dec_deg
 
-class TRAJ:
-    """Point-source/point-lens magnification with optional parallax."""
-    def __init__(self, ra_str, dec_str):
-        # geometry set by source coordinates
+class Parallax:
+    """Compute projected parallax components for a source direction.
 
+    Builds local east/north basis from the source coordinates and provides
+    time-dependent projections (q_n, q_e) of the Earth's orbital motion
+    relative to a chosen reference epoch.
+    """
+    def __init__(self, ra_str: str, dec_str: str):
+        # geometry set by source coordinates
         alpha_deg, delta_deg = hms_dms_to_deg(ra_str, dec_str)
         alpha_rad = alpha_deg * RADIAN_PER_DEGREE
         delta_rad = delta_deg * RADIAN_PER_DEGREE
@@ -83,8 +95,8 @@ class TRAJ:
         self.xpos = spring * cos_ref + summer * sin_ref
         self.ypos = -spring * sin_ref + summer * cos_ref
 
-        self.qns_cache = []
-        self.qes_cache = []
+        self.qns_cache: list[np.ndarray] = []
+        self.qes_cache: list[np.ndarray] = []
         self.is_precal = False
 
     def precalculate_parallax(self, t_list):
@@ -162,131 +174,110 @@ class TRAJ:
         return qn_final, qe_final
 
 
-class PSPL:
-    """Point-source/point-lens magnification with optional parallax."""
-    def __init__(self, ra_str, dec_str):
-        # geometry set by source coordinates
+class PSPL(Parallax):
+    """Point-source/point-lens magnification with optional parallax.
 
-        alpha_deg, delta_deg = hms_dms_to_deg(ra_str, dec_str)
-        alpha_rad = alpha_deg * RADIAN_PER_DEGREE
-        delta_rad = delta_deg * RADIAN_PER_DEGREE
+    Inherits geometry and parallax trajectory from Parallax; adds the PSPL
+    magnification calculation.
+    """
+    def magnification(self, t, param, dataset_id: int = -1):
+        """Compute PSPL magnification for times t and parameter dict.
 
-        cos_alpha, sin_alpha = np.cos(alpha_rad), np.sin(alpha_rad)
-        cos_delta, sin_delta = np.cos(delta_rad), np.sin(delta_rad)
-
-        star_direction = np.array([cos_alpha * cos_delta, sin_alpha * cos_delta, sin_delta])
-        north_pole = np.array([0.0, 0.0, 1.0])
-        east_vec = np.cross(north_pole, star_direction)
-        self.east = east_vec / np.linalg.norm(east_vec)
-        self.north = np.cross(star_direction, self.east)
-
-        spring = np.array([1.0, 0.0, 0.0])
-        summer = np.array([0.0, 0.9174, 0.3971])
-        phi_ref = (1.0 - PERIHELION_OFFSET_DAYS / 365.25) * TWO_PI
-        psi_ref = _get_psi_njit(np.array(phi_ref), ECCENTRICITY)
-        cos_ref = (np.cos(psi_ref) - ECCENTRICITY) / (1.0 - ECCENTRICITY * np.cos(psi_ref))
-        sin_ref = -np.sqrt(1.0 - cos_ref**2)
-
-        self.xpos = spring * cos_ref + summer * sin_ref
-        self.ypos = -spring * sin_ref + summer * cos_ref
-
-        self.qns_cache = []
-        self.qes_cache = []
-        self.is_precal = False
-
-    def precalculate_parallax(self, t_list):
-        """Cache projected Sun positions for each dataset time array."""
-        self.qns_cache.clear()
-        self.qes_cache.clear()
-        for t_arr in t_list:
-            sun_pos = _get_projected_sun_pos_njit(
-                t_arr,
-                PERIHELION_JD,
-                TWO_PI,
-                ECCENTRICITY,
-                self.xpos,
-                self.ypos,
-                SQRT_1_MINUS_ECC_SQ,
-            )
-            self.qns_cache.append(self.north @ sun_pos)
-            self.qes_cache.append(self.east @ sun_pos)
-        self.is_precal = True
-
-    def get_parallax_components(self, t, t0, dataset_id):
-        """Return (qn, qe) projected components relative to t0."""
-        sun_pos_t0_plus_1 = _get_projected_sun_pos_njit(
-            np.array(t0 + 1.0),
-            PERIHELION_JD,
-            TWO_PI,
-            ECCENTRICITY,
-            self.xpos,
-            self.ypos,
-            SQRT_1_MINUS_ECC_SQ,
-        )
-        sun_pos_t0_minus_1 = _get_projected_sun_pos_njit(
-            np.array(t0 - 1.0),
-            PERIHELION_JD,
-            TWO_PI,
-            ECCENTRICITY,
-            self.xpos,
-            self.ypos,
-            SQRT_1_MINUS_ECC_SQ,
-        )
-        sun_pos_t0 = _get_projected_sun_pos_njit(
-            np.array(t0),
-            PERIHELION_JD,
-            TWO_PI,
-            ECCENTRICITY,
-            self.xpos,
-            self.ypos,
-            SQRT_1_MINUS_ECC_SQ,
-        )
-
-        qn2 = self.north @ sun_pos_t0_plus_1
-        qe2 = self.east @ sun_pos_t0_plus_1
-        qn1 = self.north @ sun_pos_t0_minus_1
-        qe1 = self.east @ sun_pos_t0_minus_1
-        qn0 = self.north @ sun_pos_t0
-        qe0 = self.east @ sun_pos_t0
-
-        if dataset_id >= 0 and self.is_precal:
-            qn, qe = self.qns_cache[dataset_id], self.qes_cache[dataset_id]
-        else:
-            sun_pos = _get_projected_sun_pos_njit(
-                t,
-                PERIHELION_JD,
-                TWO_PI,
-                ECCENTRICITY,
-                self.xpos,
-                self.ypos,
-                SQRT_1_MINUS_ECC_SQ,
-            )
-            qn, qe = self.north @ sun_pos, self.east @ sun_pos
-
-        dt = t - t0
-        qn_final = qn - (qn0 + (qn2 - qn1) * dt * 0.5)
-        qe_final = qe - (qe0 + (qe2 - qe1) * dt * 0.5)
-        return qn_final, qe_final
-
-    def magnification(self, t, param, dataset_id=-1):
-        """Compute PSPL magnification for times t and parameter dict."""
+        Expected keys in param: t0, u0, and either tE or (teff,u0).
+        Optional parallax vector components: pi1, pi2.
+        """
         t0 = param["t0"]
         u0 = param["u0"]
         tE = param.get("tE", abs(param["teff"] / u0))
         tau = (t - t0) / tE
-        beta = u0
-        pi1 = param.get("pi1", 0.0)
-        pi2 = param.get("pi2", 0.0)
-        pi_sq = pi1**2 + pi2**2
-        if pi_sq > 0:
+        u = u0
+        piEN = param.get("pi1", 0.0)
+        piEE = param.get("pi2", 0.0)
+        if (piEN * piEN + piEE * piEE) > 0.0:
             qn, qe = self.get_parallax_components(t, t0, dataset_id)
-            tau += qn * pi1 + qe * pi2
-            beta += -qn * pi2 + qe * pi1
-        u_sq = tau**2 + beta**2
+            tau += qn * piEN + qe * piEE
+            u += -qn * piEE + qe * piEN
+        u_sq = tau * tau + u * u
         u_sq_p4 = u_sq + 4.0
         return (u_sq + 2.0) / np.sqrt(u_sq * u_sq_p4)
 
 
 
-class PSBL:
-    ...
+class PSBL(Parallax):
+    """Point-source binary-lens magnification using VBBinaryLensing.
+
+    - Provides the same interface as PSPL: `.precalculate_parallax` and
+      `.magnification(t, params, dataset_id=...)`.
+    - Computes (tau, beta) with optional parallax (pi1, pi2) using Parallax.
+    - Rotates trajectory by `alpha` (radians) to get (x, y) in lens frame.
+    - Calls `VBBinaryLensing.BinaryMag2` on (s, q, x, y).
+
+    Expected params keys:
+      t0, u0, tE, s, q, alpha[, rho, pi1, pi2]
+    """
+    def __init__(self, ra_str: str, dec_str: str, rel_tol: float = 1e-3, tol: float = 1e-3):
+        # Initialize parallax geometry
+        super().__init__(ra_str, dec_str)
+        vbbl.Tol = tol
+        vbbl.RelTol = rel_tol
+
+    @staticmethod
+    def normalize(param: dict) -> dict:
+        param = param.copy()
+        param["rho"] = param.get("rho", 10 ** param.get("logrho", -6))
+        param["q"] = param.get("q", 10 ** param.get("logq", -4))
+        param["s"] = param.get("s", 10 ** param.get("logs", -4))
+        param["tE"] = param.get("tE", abs(param["teff"] / param["u0"]))
+        return param
+
+    def trajectory(self, t: NDArray, param: dict, dataset_id: int = -1) -> tuple[NDArray, NDArray]:
+        ''' Source Position (y1, y2) relative to Binary-Lens c.o.m. '''
+
+        t0, u0, tE = param["t0"], param["u0"], param["tE"]
+        alpha = param["alpha"]  # radians
+        piEN, piEE = param["pi1"], param["pi2"]  # parallax components in EN frame
+
+        tau = (t - t0) / tE
+        u = u0
+
+        if (piEN * piEN + piEE * piEE) > 0.0:
+            qn, qe = self.get_parallax_components(t, t0, dataset_id)
+            tau += + qn * piEN + qe * piEE
+            u   += + qe * piEN - qn * piEE
+
+        calpha, salpha = np.cos(alpha), np.sin(alpha)
+        y1 = + u * salpha - tau * calpha
+        y2 = - u * calpha - tau * salpha
+
+        return y1, y2
+
+    def north_east(self, param: dict) -> tuple[tuple[NDArray, NDArray], tuple[NDArray, NDArray]]:
+        # direction of piE source -> lens
+        piEN, piEE = param["pi1"], param["pi2"]  # parallax components in EN frame
+        alpha = param["alpha"]  # radians
+        calpha, salpha = np.cos(alpha), np.sin(alpha)
+        Phi_pi = np.arctan2(piEE, piEN) # PA of the \mu_LS
+
+        # partial (tau, u) / partial qn -> North
+        tau, u = piEN, -piEE
+        y1_north = + u * salpha - tau * calpha
+        y2_north = - u * calpha - tau * salpha
+        y1_north, y2_north = -y1_north, -y2_north  # flip as y1, y2 are source position
+
+
+        # partial (tau, u) / partial qe -> East
+        tau, u = piEE, piEN
+        y1_east = + u * salpha - tau * calpha
+        y2_east = - u * calpha - tau * salpha
+        y1_east, y2_east = -y1_east, -y2_east  # flip as y1, y2 are source position
+
+        return (y1_north, y2_north), (y1_east, y2_east)
+
+
+    def magnification(self, t: NDArray, param: dict, dataset_id: int = -1) -> NDArray:
+        param = self.normalize(param)
+        s, q = param["s"], param["q"]
+        rho = param["rho"]
+        y1, y2 = self.trajectory(t, param, dataset_id)
+
+        return np.array(vbbl.BinaryMag2_vec(s, q, y1, y2, rho))

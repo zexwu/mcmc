@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Callable
 
 import numpy as np
-import toml
 
 
 @dataclass
@@ -18,12 +17,6 @@ class PhotDataset:
     blending: bool
     data: np.ndarray   # columns: time, mag/flux, err
     flux: np.ndarray   # same shape as data, converted to flux
-
-
-def _resolve(path: str, base: Path) -> Path:
-    """Resolve a path relative to base, expanding ~."""
-    p = Path(path).expanduser()
-    return p if p.is_absolute() else (base / p).resolve()
 
 
 def load_photometry_file(path: str, subtract_jd: bool = True, jd_offset: float = 2450000.0) -> np.ndarray:
@@ -43,16 +36,6 @@ def mag_to_flux(arr: np.ndarray, ref_mag: float = 18.0) -> np.ndarray:
     out[:, 1] = flux
     out[:, 2] = flux * err * 0.4 * np.log(10.0)
     return out
-
-
-def read_config(config_file: str | Path) -> tuple[dict, Path]:
-    """Read TOML config; return (config, base_dir).
-
-    No path normalization here; resolution happens at use-sites relative to base_dir.
-    """
-    cfg_path = Path(config_file).expanduser().resolve()
-    cfg = toml.load(cfg_path)
-    return cfg, cfg_path.parent
 
 
 def load_photometry(cfg: dict, mask: Callable[[np.ndarray], np.ndarray] | None = None) -> list[PhotDataset]:
@@ -88,10 +71,3 @@ def load_photometry(cfg: dict, mask: Callable[[np.ndarray], np.ndarray] | None =
         data = _apply_mask(raw, mask_rows)
         phot.append(PhotDataset(dataset=name, filename=fname, filter=filt, blending=blend, data=data, flux=mag_to_flux(data)))
     return phot
-
-
-def load_configuration(config_file: str | Path, mask: Callable[[np.ndarray], np.ndarray] | None = None):
-    """Backward-compatible wrapper: read config then load photometry."""
-    cfg, base_dir = read_config(config_file)
-    phot = load_photometry(cfg, base_dir, mask)
-    return phot, cfg

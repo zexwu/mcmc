@@ -8,7 +8,7 @@ from typing import Dict, List, Tuple, Sequence
 
 import numpy as np
 
-from .models import PSPL
+from .models import Parallax
 from .io import PhotDataset
 
 # Cache for blob layout to avoid recomputation for each call.
@@ -67,7 +67,7 @@ def solve_blending_chi2(data_flux: np.ndarray, model: np.ndarray, blending: bool
 def log_likelihood(
     params: Dict[str, float],
     datasets: List[PhotDataset],
-    model: PSPL,
+    model: type[Parallax],
     blob_names: Sequence[str],
 ) -> Tuple[float, List]:
     chi2_total = 0.0
