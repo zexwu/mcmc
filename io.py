@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, List, Optional
 
 import numpy as np
 
@@ -18,6 +18,8 @@ class PhotDataset:
     data: np.ndarray   # columns: time, mag/flux, err
     flux: np.ndarray   # same shape as data, converted to flux
 
+    color: Optional[str|None] = None
+    zorder: Optional[int] = None
 
 def load_photometry_file(path: str, subtract_jd: bool = True, jd_offset: float = 2450000.0) -> np.ndarray:
     """Load text photometry with 3 columns; auto-subtract jd_offset if needed."""
@@ -40,10 +42,7 @@ def mag_to_flux(arr: np.ndarray, ref_mag: float = 18.0) -> np.ndarray:
 
 def load_photometry(cfg: dict, mask: Callable[[np.ndarray], np.ndarray] | None = None) -> list[PhotDataset]:
     """Load photometry datasets; filenames are resolved relative to config file."""
-    data_opts = cfg.get("data", {})
-    data_dir = Path(cfg.get("paths").get("input"))
-    jd_offset = float(data_opts.get("jd_offset", 2450000.0))
-    subtract_jd = bool(data_opts.get("subtract_jd_offset", True))
+    data_dir = Path(cfg.get("input"))
 
     def _apply_mask(data: np.ndarray, indices) -> np.ndarray:
         if mask is None and not indices:
@@ -56,18 +55,38 @@ def load_photometry(cfg: dict, mask: Callable[[np.ndarray], np.ndarray] | None =
         return data[~m]
 
     phot: list[PhotDataset] = []
-    for ent in cfg.get("phot", []):
-        name = ent.get("label", ent.get("filename"))
-        fname = ent["filename"]
-        filt = ent.get("filter")
-        blend = bool(ent.get("blending", False))
-        err_floor = float(ent.get("error_floor", 0.0))
-        err_scale = float(ent.get("error_scale", 1.0))
-        mask_rows = list(ent.get("mask_rows", []))
+    for ent in cfg["phot"]:
 
-        fpath = data_dir / fname
-        raw = load_photometry_file(str(fpath), subtract_jd=subtract_jd, jd_offset=jd_offset)
+        err_floor = ent.pop("error_floor", 0.0)
+        err_scale = ent.pop("error_scale", 1.0)
+        mask_rows = ent.pop("mask_rows", [])
+
+        fpath = data_dir / ent["filename"]
+        raw = load_photometry_file(str(fpath), subtract_jd=True, jd_offset=2450000)
         raw[:, 2] = np.sqrt(raw[:, 2] ** 2 + err_floor**2) * err_scale
         data = _apply_mask(raw, mask_rows)
-        phot.append(PhotDataset(label=name, filename=fname, filter=filt, blending=blend, data=data, flux=mag_to_flux(data)))
+
+        phot.append(PhotDataset(**ent, data=data, flux=mag_to_flux(data)))
     return phot
+
+
+def write_csv_with_metadata(path: Path, header: List[str], data: np.ndarray, metadata: List[str]):
+    """Write CSV with metadata and header using fast NumPy I/O for rows."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    formatter = {
+        "chi2": "%.2f",
+        "u0": "%.5f",
+        "teff": "%.5f",
+        "A_ref": "%.5f",
+        "t0": "%.5f",
+        "pi1": "%.5f",
+        "pi2": "%.5f",
+    }
+    fmt = [formatter.get(col, "%.5e") for col in header]
+
+    with open(path, "w", encoding="utf-8") as f:
+        for line in metadata:
+            f.write(f"# {line}\n")
+        f.write(",".join(header) + "\n")
+        np.savetxt(f, data, delimiter=",", fmt=fmt)
+

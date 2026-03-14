@@ -9,7 +9,7 @@ common reference scale, and produces a 3‑panel figure:
 - B: residuals (data − model) in magnitudes
 
 Usage:
-    python -m ulens_mcmc.lc path/to/config.toml
+    python -m mcmc.cli lc path/to/config.toml
 """
 from __future__ import annotations
 
@@ -60,7 +60,6 @@ def _get_color(label: str, idx: int = 0) -> Tuple[str, int]:
         if key in label:
             return val
     return _COLORS_LIST[idx % len(_COLORS_LIST)], idx
-    return "gray", 0
 
 
 def _flux_to_mag(arr: np.ndarray, ref_mag: float = 18.0) -> np.ndarray:
@@ -104,8 +103,7 @@ def plot_lightcurve(config_path: str | Path) -> Path:
     phot = load_photometry(cfg)
 
     # Build model from event coordinates
-    event_cfg = cfg.get("event", {})
-    coords = event_cfg.get("coords", "").split()
+    coords = cfg.get("coords", "").split()
     if len(coords) != 2:
         raise ValueError("event.coords must be 'RA DEC', e.g. '17:31:42.61 -30:46:17.04'")
 
@@ -113,7 +111,7 @@ def plot_lightcurve(config_path: str | Path) -> Path:
     model.precalculate_parallax([ds.data[:, 0] for ds in phot])
 
     # Output files from sampler
-    out_dir = Path(cfg.get("paths").get("output"))
+    out_dir = Path(cfg.get("output"))
     out_cfg = cfg.get("mcmc", {}).get("outputs", {})
     best_file = out_dir / out_cfg.get("best_file")
     if not best_file.exists():
@@ -155,22 +153,24 @@ def plot_lightcurve(config_path: str | Path) -> Path:
         mag_model_rescaled = _flux_to_mag(np.column_stack([t, mag_model * fs_ref + fb_ref, np.zeros_like(t)]))
 
         color, zorder = _get_color(ds.label, i)
+        if ds.color: color = ds.color
+        if ds.zorder: zorder = ds.zorder
 
-        errorbar_kwargs = dict(fmt="o", ms=4, capsize=0, fillstyle="none", mew=1.5, c=color, zorder=zorder, alpha=0.7)
+        ebar_kwargs = dict(fmt="o", ms=4, capsize=0, fillstyle="none", mew=1.5, c=color, zorder=zorder, alpha=0.7)
         for key in ("A", "E"):
             axd[key].errorbar(
                 mag_data[:, 0],
                 mag_data[:, 1],
                 yerr=np.abs(mag_data[:, 2]),
-                label=ds.label if key == "E" else None,
-                **errorbar_kwargs,
+                **ebar_kwargs,
             )
+        axd["E"].plot([], [], c=color, label=ds.label + rf" ${ds.filter}$")  # for legend
 
         axd["B"].errorbar(
             mag_data[:, 0],
             mag_data[:, 1] - mag_model_rescaled[:, 1],
             yerr=np.abs(mag_data[:, 2]),
-            **errorbar_kwargs,
+            **ebar_kwargs,
         )
 
         if i == 0:
@@ -214,7 +214,7 @@ def plot_lightcurve(config_path: str | Path) -> Path:
     axd["A"].sharex(axd["B"])
     axd["A"].tick_params(axis="x", which="both", bottom=True, labelbottom=False)
 
-    ev_name = event_cfg.get("name") or event_cfg.get("id") or "Light Curve"
+    ev_name = cfg.get("event")
     blend_flags = "".join("1" if ds.blending else "0" for ds in phot)
     axd["E"].set_title(f"{ev_name}; blending={blend_flags}")
     if len(phot) > 10:
@@ -223,7 +223,12 @@ def plot_lightcurve(config_path: str | Path) -> Path:
     if np.isfinite(t_ref):
         for key in ("A", "E"):
             axd[key].axvline(t_ref, c="r")
-    axd["E"].legend(ncol=2, loc="upper left")
+    axd["E"].legend(
+        handlelength=0,      # no line/marker handle
+        handletextpad=0,     # no extra space before text
+        ncol=2,
+        labelcolor='linecolor'
+    )
 
     fig.align_labels()
     fig.tight_layout()

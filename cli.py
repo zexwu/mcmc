@@ -1,68 +1,103 @@
 from __future__ import annotations
 
 import argparse
-
-from .sampler import fit
-from .lc import plot_lightcurve
+from pathlib import Path
 
 
 def _fmt_pm(m: float, p16: float, p84: float) -> str:
     du = max(0.0, p84 - m)
     dl = max(0.0, m - p16)
-    if not (du > 0 or dl > 0):
+    if not (du or dl):
         return f"{m:.6g}"
-    # choose precision from the larger uncertainty (2 sig figs)
-    u = max(du, dl) if max(du, dl) > 0 else 0.0
-    if u == 0:
-        prec = 6
-    else:
-        import math
-        exp = math.floor(math.log10(u))
-        # decimals to keep 2 significant digits of u
-        decimals = max(0, 1 - exp)
-        # clamp to a sane range
-        decimals = min(max(decimals, 0), 8)
-        prec = decimals
+
+    import math
+
+    u = max(du, dl)
+    prec = 6 if u == 0 else min(max(0, 1 - math.floor(math.log10(u))), 8)
     fmt = f"{{:.{prec}f}}"
-    m_s = fmt.format(m)
-    du_s = fmt.format(du)
-    dl_s = fmt.format(dl)
-    return f"{m_s} +{du_s} -{dl_s}"
+    return f"{fmt.format(m)} +{fmt.format(du)} -{fmt.format(dl)}"
+
+
+def _print_summary(res) -> None:
+    s = res.summary()
+    rows = [("chi2_best", f"{s['chi2_best']['value']:.3f}")]
+    rows += [
+        (name, _fmt_pm(q["median"], q["p16"], q["p84"]))
+        for name in res.param_names
+        for q in [s[name]]
+    ]
+    wk = max(len(k) for k, _ in rows)
+    wv = max(len(v) for _, v in rows)
+    for k, v in rows:
+        print(f"{k:<{wk}} = {v:>{wv}}")
+
+
+def _load_chain(path: str):
+    import numpy as np
+
+    with open(path, encoding="utf-8") as f:
+        for i, line in enumerate(f):
+            if not line.startswith("#"):
+                names = line.strip().split(",")
+                break
+        else:
+            raise ValueError(f"no header found in {path}")
+
+    arr = np.loadtxt(path, delimiter=",", comments="#", skiprows=i + 1)
+    return names, np.rec.fromarrays(arr.T, names=",".join(names))
+
+
+def cmd_run(args) -> int:
+    from .sampler import fit
+
+    _print_summary(fit(args.config))
+    return 0
+
+
+def cmd_lc(args) -> int:
+    from .lc import plot_lightcurve
+
+    print(f"Saved: {plot_lightcurve(args.config)}")
+    return 0
+
+
+def cmd_chi2(args) -> int:
+    from .chi2plot import chi2plot
+
+    names, tab = _load_chain(args.chain)
+    params = args.names or [n for n in names if n != "chi2"]
+    out = f"{Path(args.chain).with_suffix('')}_chi2.png"
+    chi2plot(tab, parameters=params, colorbar=False, filename=out)
+    print(f"Saved: {out}")
+    return 0
+
+
+def make_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="microlens-mcmc",
+        description="Fit microlensing lightcurves with emcee",
+    )
+    sp = p.add_subparsers(required=True)
+
+    run = sp.add_parser("run", help="Run MCMC from TOML config")
+    run.add_argument("config", help="Path to conf.toml")
+    run.set_defaults(func=cmd_run)
+
+    lc = sp.add_parser("lc", help="Plot lightcurve from TOML config")
+    lc.add_argument("config", help="Path to conf.toml")
+    lc.set_defaults(func=cmd_lc)
+
+    chi2 = sp.add_parser("chi2", help="Plot chi2 surface from chain.csv")
+    chi2.add_argument("chain", help="Path to chain.csv")
+    chi2.add_argument("--names", nargs="*", help="parameter names to plot")
+    chi2.set_defaults(func=cmd_chi2)
+
+    return p
 
 
 def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="microlens-mcmc", description="Fit microlensing lightcurves with emcee")
-    sp = p.add_subparsers(dest="cmd", required=True)
-    r = sp.add_parser("run", help="Run MCMC from TOML config")
-    r.add_argument("config", help="Path to conf.toml")
-
-    r = sp.add_parser("plot", help="Plot lightcurve from TOML config")
-    r.add_argument("config", help="Path to conf.toml")
-
-    args = p.parse_args(argv)
-    if args.cmd == "run":
-        res = fit(args.config)
-        s = res.summary()
-        # build aligned lines
-        lines = []
-        lines.append(("chi2_best", f"{s['chi2_best']['value']:.3f}"))
-        for name in res.param_names:
-            q = s[name]
-            lines.append((name, _fmt_pm(q['median'], q['p16'], q['p84'])))
-        w_key = max(len(k) for k, _ in lines)
-        w_val = max(len(v) for _, v in lines)
-        for key, val in lines:
-            print(f"{key:<{w_key}} = {val:>{w_val}}")
-        return 0
-
-    if args.cmd == "plot":
-        out = plot_lightcurve(args.config)
-        import matplotlib.pyplot as plt
-        plt.show()
-        print(f"Saved: {out}")
-        return 0
-
-    return 0
+    args = make_parser().parse_args(argv)
+    return args.func(args)
 
 
 if __name__ == "__main__":

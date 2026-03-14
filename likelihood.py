@@ -4,7 +4,7 @@ Caches the blob tuple layout so lnprob stays fast.
 """
 from __future__ import annotations
 
-from typing import Dict, List, Tuple, Sequence
+from typing import Dict, List, Tuple, Sequence, Any
 
 import numpy as np
 
@@ -67,23 +67,27 @@ def solve_blending_chi2(data_flux: np.ndarray, model: np.ndarray, blending: bool
 def log_likelihood(
     params: Dict[str, float],
     datasets: List[PhotDataset],
-    model: type[Parallax],
+    model: Parallax,
     blob_names: Sequence[str],
-) -> Tuple[float, List]:
+) -> Tuple[float, Any]:
+    # Precompute parallax trajectories for these datasets (simple LC fitting)
+    if not getattr(model, "is_precal", False):
+        model.precalculate_parallax([ds.data[:, 0] for ds in datasets])
     chi2_total = 0.0
-    t = [None] * len(blob_names)
+    blob = [None] * len(blob_names)
     fs_pos, fb_pos, idx_Aref = _get_blob_layout(blob_names, datasets)
 
     for dataset_id, ds in enumerate(datasets):
-        mag = model.magnification(ds.data[:, 0], params, dataset_id=dataset_id)
+        t = ds.data[:, 0]
+        mag = model.magnification(t, params, dataset_id=dataset_id)
         chi2, lin_params = solve_blending_chi2(ds.flux, mag, blending=ds.blending)
         chi2_total += chi2
         if fs_pos[dataset_id] >= 0:
-            t[fs_pos[dataset_id]] = float(lin_params[0])
+            blob[fs_pos[dataset_id]] = float(lin_params[0])
         if fb_pos[dataset_id] >= 0:
-            t[fb_pos[dataset_id]] = float(lin_params[1])
+            blob[fb_pos[dataset_id]] = float(lin_params[1])
 
     if idx_Aref >= 0:
-        t[idx_Aref] = model.magnification(params["t_ref"], params, dataset_id=-1)
+        blob[idx_Aref] = model.magnification(params["t_ref"], params, dataset_id=-1)
 
-    return -0.5 * chi2_total, t
+    return -0.5 * chi2_total, blob

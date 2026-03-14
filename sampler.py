@@ -7,19 +7,21 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Sequence
 
 from numpy.typing import NDArray
 import toml
 import emcee
+import warnings
 import numpy as np
 
 from .config import FitConfig, build_fit_config
-from .io import PhotDataset, load_photometry
+from .io import load_photometry, write_csv_with_metadata
 from .likelihood import log_likelihood
-from .models import PSPL, PSBL, Parallax
+from .models import PSPL, PSBL
 from multiprocessing import Pool
 
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 
 @dataclass
 class Results:
@@ -69,7 +71,7 @@ def _initialize_walkers(fit: FitConfig) -> np.ndarray:
     names = fit.free
     d = len(names)
     centers = np.array([fit.start[n] for n in names], dtype=float)
-    widths = np.array([fit.step[n] for n in names], dtype=float)
+    widths = np.array([fit.sigma[n] for n in names], dtype=float)
     lows = np.full(d, -np.inf)
     highs = np.full(d, np.inf)
     for j, n in enumerate(names):
@@ -116,18 +118,8 @@ def _initialize_walkers(fit: FitConfig) -> np.ndarray:
     return np.vstack(acc_list)[: fit.n_walkers]
 
 
-def _write_csv_with_metadata(path: Path, header: List[str], data: np.ndarray, metadata: List[str]):
-    """Write CSV with metadata and header using fast NumPy I/O for rows."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        for line in metadata:
-            f.write(f"# {line}\n")
-        f.write(",".join(header) + "\n")
-        np.savetxt(f, data, delimiter=",", fmt="%.8g")
-
-
 # scalar log-prob with emcee-supported blob tuples
-def lnprob(theta: NDArray, phot: List[PhotDataset], model: type[Parallax], fit_config: FitConfig):
+def lnprob(theta: NDArray, datasets: Sequence[Any], model: Any, fit_config: FitConfig):
     p = dict(zip(fit_config.free, theta))
     p.update(fit_config.param_fix)
 
@@ -143,7 +135,7 @@ def lnprob(theta: NDArray, phot: List[PhotDataset], model: type[Parallax], fit_c
             if fit_config.blob_names: return null
             return -np.inf
     # also pass bounds into likelihood for internal checking
-    ll, blob = log_likelihood(p, phot, model, fit_config.blob_names)
+    ll, blob = log_likelihood(p, datasets, model, fit_config.blob_names)
     lp = ll / fit_config.temperature
     return (lp, *blob) if fit_config.blob_names else lp
 
@@ -159,8 +151,7 @@ def fit(config_path: str | Path) -> Results:
     phot = load_photometry(cfg)
 
     # Build model and precompute parallax
-    event_cfg = cfg.get("event", {})
-    coords = event_cfg.get("coords", "").split()
+    coords = cfg.get("coords", "").split()
     if len(coords) != 2:
         raise ValueError("event.coords must be 'RA DEC' string, e.g. '17:31:42.61 -30:46:17.04'")
 
@@ -168,7 +159,6 @@ def fit(config_path: str | Path) -> Results:
     fit_config = build_fit_config(cfg)
 
     model = globals()[fit_config.model](*coords)
-    model.precalculate_parallax([ds.data[:, 0] for ds in phot])
 
     # Initialize walkers around starts with Gaussian scatter
     np.random.seed(fit_config.seed)  # for any non-NumPy code that uses global seed
@@ -176,6 +166,9 @@ def fit(config_path: str | Path) -> Results:
 
     # Run sampler (scalar lnprob)
     blob_dtype = [(name, float) for name in fit_config.blob_names] if fit_config.blob_names else None
+    pool = None
+    if fit_config.n_processes > 1:
+        pool = Pool(fit_config.n_processes)
     sampler = emcee.EnsembleSampler(
         fit_config.n_walkers,
         fit_config.n_param,
@@ -183,16 +176,16 @@ def fit(config_path: str | Path) -> Results:
         args=(phot, model, fit_config),
         blobs_dtype=blob_dtype,
         moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
-        pool=Pool(fit_config.n_processes)
+        pool=pool
     )
 
     max_steps = fit_config.n_steps
-    state = sampler.run_mcmc(p0, fit_config.check_interval)
+    state = sampler.run_mcmc(p0, fit_config.check_interval, progress=False)
     steps_done = fit_config.check_interval
     last_tau = np.inf
     while steps_done < max_steps:
         run = min(fit_config.check_interval, max_steps - steps_done)
-        discard = max(0, steps_done - 10 * fit_config.check_interval)
+        discard = max(0, steps_done - 3 * fit_config.check_interval)
 
         tau = sampler.get_autocorr_time(tol=0, discard=discard)
         tau = np.clip(tau, 1e-8, None)
@@ -203,13 +196,14 @@ def fit(config_path: str | Path) -> Results:
         accepted = np.any(chain[1:] != chain[:-1], axis=2)
         rolling_af = np.mean(accepted)
 
-        print("\r"+event_cfg.get("name")+">",
+        print("\r"+cfg.get("event")+">",
                 f" N= {steps_done};",
                 f" tau= {tau.astype(int)};",
                 f" N/tau= {steps_done / tau.max():4.0f};",
                 f" relerr= {rel_err:.1%};",
                 f" acc= {rolling_af:.1%} ",
                 end="", flush=True)
+        print()
         if _should_stop(tau, last_tau, steps_done, fit_config):
             break
         if tau is not None and np.isfinite(tau).all():
@@ -244,7 +238,7 @@ def fit(config_path: str | Path) -> Results:
     best = {**best_params, "chi2": chi2_best}
 
     # write outputs
-    out_dir = Path(cfg.get("paths").get("output"))
+    out_dir = Path(cfg.get("output"))
     out_cfg = cfg.get("mcmc", {}).get("outputs", {})
     chain_file = out_dir / out_cfg.get("chain_file")
     best_file = out_dir / out_cfg.get("best_file")
@@ -262,14 +256,15 @@ def fit(config_path: str | Path) -> Results:
         f"seed={fit_config.seed}; samples={data_all.shape[0]}",
     ]
 
-    _write_csv_with_metadata(chain_file, header, data_all, metadata)
-    # best: single row
-    best_row = data_all[idx_best]  # keep as 2D for consistent writing
+    write_csv_with_metadata(chain_file, header, data_all, metadata)
+    best_row = data_all[idx_best]
+
     # add fixed parameters to results
     for par in fit_config.fixed:
         header.append(par)
         best_row = np.insert(best_row, header.index(par), fit_config.param_fix[par])
     best_row = np.atleast_2d(best_row)
-    _write_csv_with_metadata(best_file, header, best_row, metadata)
+
+    write_csv_with_metadata(best_file, header, best_row, metadata)
 
     return Results(samples=samples, log_prob=logp_flat, blobs=blob_dict, param_names=names, best=best)

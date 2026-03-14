@@ -6,21 +6,26 @@
 
 Numba is optional; falls back to pure NumPy.
 """
+
 from __future__ import annotations
 
-from typing import Tuple, Dict
+from typing import Dict, Tuple
+
 import numpy as np
 from numpy.typing import NDArray
 
 try:
     from numba import njit as _njit
 except Exception:  # pragma: no cover
+
     def _njit(func=None, **_):
         if func is None:
             return lambda f: f
         return func
 
+
 from . import VBBinaryLensing as _VBB
+
 vbbl = _VBB.VBBinaryLensing()
 
 
@@ -64,6 +69,7 @@ def hms_dms_to_deg(ra_str, dec_str):
     dec_deg = sign * (dec_d + dec_m / 60.0 + dec_s / 3600.0)
     return ra_deg, dec_deg
 
+
 class Parallax:
     """Compute projected parallax components for a source direction.
 
@@ -71,6 +77,7 @@ class Parallax:
     time-dependent projections (q_n, q_e) of the Earth's orbital motion
     relative to a chosen reference epoch.
     """
+
     def __init__(self, ra_str: str, dec_str: str):
         # geometry set by source coordinates
         alpha_deg, delta_deg = hms_dms_to_deg(ra_str, dec_str)
@@ -80,7 +87,9 @@ class Parallax:
         cos_alpha, sin_alpha = np.cos(alpha_rad), np.sin(alpha_rad)
         cos_delta, sin_delta = np.cos(delta_rad), np.sin(delta_rad)
 
-        star_direction = np.array([cos_alpha * cos_delta, sin_alpha * cos_delta, sin_delta])
+        star_direction = np.array(
+            [cos_alpha * cos_delta, sin_alpha * cos_delta, sin_delta]
+        )
         north_pole = np.array([0.0, 0.0, 1.0])
         east_vec = np.cross(north_pole, star_direction)
         self.east = east_vec / np.linalg.norm(east_vec)
@@ -90,7 +99,9 @@ class Parallax:
         summer = np.array([0.0, 0.9174, 0.3971])
         phi_ref = (1.0 - PERIHELION_OFFSET_DAYS / 365.25) * TWO_PI
         psi_ref = _get_psi_njit(np.array(phi_ref), ECCENTRICITY)
-        cos_ref = (np.cos(psi_ref) - ECCENTRICITY) / (1.0 - ECCENTRICITY * np.cos(psi_ref))
+        cos_ref = (np.cos(psi_ref) - ECCENTRICITY) / (
+            1.0 - ECCENTRICITY * np.cos(psi_ref)
+        )
         sin_ref = -np.sqrt(1.0 - cos_ref**2)
 
         self.xpos = spring * cos_ref + summer * sin_ref
@@ -185,20 +196,23 @@ class PSPL(Parallax):
     @staticmethod
     def normalize(param: Dict) -> Dict:
         param = param.copy()
-        param["tE"] = param.get("tE", abs(param["teff"] / param["u0"]))
+        if "tE" not in param:
+            param["tE"] = abs(param["teff"] / param["u0"])
         param["pi1"] = param.get("pi1", 0.0)
         param["pi2"] = param.get("pi2", 0.0)
 
         return param
 
-    def north_east(self, param: Dict) -> Tuple[Tuple[float, float], Tuple[float, float]]:
-        # direction of piE source -> lens
+    def north_east(
+        self, param: Dict
+    ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+        # Direction of piE source -> lens
         piEN, piEE = param["pi1"], param["pi2"]  # parallax components in EN frame
         piE = np.hypot(piEN, piEE)
         if piE == 0.0:
             return (np.nan, np.nan), (np.nan, np.nan)
 
-        Phi_pi = np.arctan2(piEE, piEN) # PA of the \mu_LS
+        Phi_pi = np.arctan2(piEE, piEN)  # PA of the \mu_LS
 
         # partial (tau, u) / partial qn -> North
         tau_north, u_north = piEN / piE, -piEE / piE
@@ -207,7 +221,9 @@ class PSPL(Parallax):
         tau_east, u_east = piEE / piE, piEN / piE
         return (tau_north, u_north), (tau_east, u_east)
 
-    def trajectory(self, t: NDArray, param: Dict, dataset_id: int = -1) -> Tuple[NDArray, NDArray]:
+    def trajectory(
+        self, t: NDArray, param: Dict, dataset_id: int = -1
+    ) -> Tuple[NDArray, NDArray]:
         param = self.normalize(param)
         t0, u0, tE = param["t0"], param["u0"], param["tE"]
         piEN, piEE = param["pi1"], param["pi2"]  # parallax components in EN frame
@@ -236,25 +252,24 @@ class PSPL(Parallax):
 
         return (u_sq + 2.0) / np.sqrt(u_sq * u_sq_p4)
 
-
     def images(self, t: NDArray, param: Dict, thetaE: float = 1, dataset_id: int = -1):
         """Compute PSPL major-to-minor vectors (x, y, eta) in u, v plane for times t and parameter dict."""
         taup, up = self.trajectory(t, param, dataset_id)
         u_sq = taup * taup + up * up
         u_sq_p4 = u_sq + 4.0
         A = (u_sq + 2.0) / np.sqrt(u_sq * u_sq_p4)
-        eta = (A-1) / (A+1)
-        sep = (eta ** 0.25 + eta ** -0.25) # image separation in thetaE units
+        eta = (A - 1) / (A + 1)
+        sep = eta**0.25 + eta**-0.25  # image separation in thetaE units
 
         (tau_north, u_north), (tau_east, u_east) = self.north_east(param)
 
         # tau, u -> north, east
         det = tau_east * u_north - tau_north * u_east
-        ue = ( u_north * taup - tau_north * up) / det   # east
-        un = (-u_east  * taup + tau_east  * up) / det   # north
+        ue = (u_north * taup - tau_north * up) / det  # east
+        un = (-u_east * taup + tau_east * up) / det  # north
 
         # source position -> major-to-minor vector
-        dn, de = - sep * un / u_sq ** 0.5, - sep * ue / u_sq ** 0.5
+        dn, de = -sep * un / u_sq**0.5, -sep * ue / u_sq**0.5
         return dn * thetaE, de * thetaE, eta
 
 
@@ -270,7 +285,10 @@ class PSBL(Parallax):
     Expected params keys:
       t0, u0, tE, s, q, alpha[, rho, pi1, pi2]
     """
-    def __init__(self, ra_str: str, dec_str: str, rel_tol: float = 1e-3, tol: float = 1e-3):
+
+    def __init__(
+        self, ra_str: str, dec_str: str, rel_tol: float = 1e-3, tol: float = 1e-3
+    ):
         # Initialize parallax geometry
         super().__init__(ra_str, dec_str)
         vbbl.Tol = tol
@@ -282,11 +300,14 @@ class PSBL(Parallax):
         param["rho"] = param.get("rho", 10 ** param.get("logrho", -6))
         param["q"] = param.get("q", 10 ** param.get("logq", -4))
         param["s"] = param.get("s", 10 ** param.get("logs", -4))
-        param["tE"] = param.get("tE", abs(param["teff"] / param["u0"]))
+        if "tE" not in param:
+            param["tE"] = abs(param["teff"] / param["u0"])
         return param
 
-    def trajectory(self, t: NDArray, param: Dict, dataset_id: int = -1) -> Tuple[NDArray, NDArray]:
-        ''' Source Position (y1, y2) relative to Binary-Lens c.o.m. '''
+    def trajectory(
+        self, t: NDArray, param: Dict, dataset_id: int = -1
+    ) -> Tuple[NDArray, NDArray]:
+        """Source Position (y1, y2) relative to Binary-Lens c.o.m."""
 
         t0, u0, tE = param["t0"], param["u0"], param["tE"]
         alpha = param["alpha"]  # radians
@@ -297,37 +318,37 @@ class PSBL(Parallax):
 
         if (piEN * piEN + piEE * piEE) > 0.0:
             qn, qe = self.get_parallax_components(t, t0, dataset_id)
-            tau += + qn * piEN + qe * piEE
-            u   += + qe * piEN - qn * piEE
+            tau += +qn * piEN + qe * piEE
+            u += +qe * piEN - qn * piEE
 
         calpha, salpha = np.cos(alpha), np.sin(alpha)
-        y1 = + u * salpha - tau * calpha
-        y2 = - u * calpha - tau * salpha
+        y1 = +u * salpha - tau * calpha
+        y2 = -u * calpha - tau * salpha
 
         return y1, y2
 
-    def north_east(self, param: Dict) -> Tuple[Tuple[float, float], Tuple[float, float]]:
-        # direction of piE source -> lens
+    def north_east(
+        self, param: Dict
+    ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+        # Direction of piE source -> lens
         piEN, piEE = param["pi1"], param["pi2"]  # parallax components in EN frame
         alpha = param["alpha"]  # radians
         calpha, salpha = np.cos(alpha), np.sin(alpha)
-        Phi_pi = np.arctan2(piEE, piEN) # PA of the \mu_LS
+        Phi_pi = np.arctan2(piEE, piEN)  # PA of the \mu_LS
 
         # partial (tau, u) / partial qn -> North
         tau, u = piEN, -piEE
-        y1_north = + u * salpha - tau * calpha
-        y2_north = - u * calpha - tau * salpha
+        y1_north = +u * salpha - tau * calpha
+        y2_north = -u * calpha - tau * salpha
         y1_north, y2_north = -y1_north, -y2_north  # flip as y1, y2 are source position
-
 
         # partial (tau, u) / partial qe -> East
         tau, u = piEE, piEN
-        y1_east = + u * salpha - tau * calpha
-        y2_east = - u * calpha - tau * salpha
+        y1_east = +u * salpha - tau * calpha
+        y2_east = -u * calpha - tau * salpha
         y1_east, y2_east = -y1_east, -y2_east  # flip as y1, y2 are source position
 
         return (y1_north, y2_north), (y1_east, y2_east)
-
 
     def magnification(self, t: NDArray, param: Dict, dataset_id: int = -1) -> NDArray:
         param = self.normalize(param)
@@ -338,10 +359,15 @@ class PSBL(Parallax):
         return np.array(vbbl.BinaryMag2_vec(s, q, y1, y2, rho))
 
 
-
 if __name__ == "__main__":
     coord = "17:31:42.61 -30:46:17.04"
     model = PSPL(*coord.split())
     t = np.array([10096])
-    param = {"t0": 10097.7070, "u0": 0.68033, "teff": 48.4662, "pi1": 0.0799, "pi2": -0.0632}
+    param = {
+        "t0": 10097.7070,
+        "u0": 0.68033,
+        "teff": 48.4662,
+        "pi1": 0.0799,
+        "pi2": -0.0632,
+    }
     print(model.images(t, param))

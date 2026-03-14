@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+import numpy as np
 
 
 @dataclass
@@ -17,18 +18,24 @@ class FitConfig:
     Use `.free` for the ordered free-parameter names and `.fixed_values`
     for a dict of fixed names to values.
     """
-    step: Mapping[str, float]
+
+    # model name (e.g. "PSPL", "PSBL")
+    model: str
+
+    # parameter tables
+    sigma: Mapping[str, float]
     fixed: Sequence[str]
     start: Mapping[str, float]
+
+    # blob names (e.g. "t_ref", "u0_sign")
     blob_names: Sequence[str]
-    model: str = "PSPL"
-    temperature: float = 1.0
-    n_walkers: int = 10
-    n_steps: int = 50000
-    n_processes: int = 1
     t_ref: float = -1
 
     # sampling controls
+    temperature: float = 1.0
+    n_processes: int = 1
+    n_walkers: int = 10
+    n_steps: int = 50000
     seed: int = 0
     burn_in: int = 0
     thin: int = 1
@@ -43,16 +50,11 @@ class FitConfig:
 
     def __post_init__(self):
         # Normalize inputs and capture a stable free-parameter order.
-        self.step = dict(self.step)
+        self.sigma = dict(self.sigma)
         self.start = dict(self.start)
         self.fixed = list(self.fixed)
+        self.free = [name for name in self.sigma if name not in self.fixed]
         self.blob_names = list(self.blob_names or [])
-        # dict preserves TOML order; keep it for consistent sampling/outputs
-        self._fit_order = list(self.step.keys())
-
-    @property
-    def free(self) -> List[str]:
-        return self._fit_order
 
     @property
     def param_fix(self) -> Dict[str, float]:
@@ -60,48 +62,41 @@ class FitConfig:
 
     @property
     def n_param(self) -> int:
-        return len(self._fit_order)
+        return len(self.free)
 
     @property
     def n_blobs(self) -> int:
         return len(self.blob_names)
 
     def initial_theta(self) -> List[float]:
-        return [self.start[name] for name in self._fit_order]
+        return [self.start[name] for name in self.free]
 
 
 def build_fit_config(config: dict) -> FitConfig:
     """Build FitConfig from a loaded TOML dict.
 
-    Supports both flat `[mcmc]` keys and legacy `[mcmc.config]`.
     """
     mcmc = config.get("mcmc", {})
     params = mcmc.get("parameters")
-    if not params:
-        raise ValueError("Missing [mcmc.parameters]")
 
     # parameter tables
     start = {k: float(v["start"]) for k, v in params.items()}
-    steps = {k: float(v["step"]) for k, v in params.items() if not v.get("fixed", False)}
+    sigma = {k: float(v["sigma"]) for k, v in params.items()}
     fixed = [k for k, v in params.items() if v.get("fixed", False)]
 
-    # sampler knobs (flat preferred, fallback to legacy [mcmc.config])
-    cfg = {**mcmc.get("config", {}), **{k: v for k, v in mcmc.items() if k not in ["parameters", "outputs"]}}
-
-    fit = FitConfig(
-        step=steps,
-        fixed=fixed,
-        start=start,
-        **cfg
-    )
-
-    # simple bounds: u0 sign rule, then explicit per-parameter bounds
     bounds: Dict[str, Optional[Tuple[float, float]]] = {}
     for name, spec in params.items():
-        b = spec.get("bounds")
-        if b and len(b) == 2:
-            bounds[name] = (float(b[0]), float(b[1]))
-        elif name not in bounds:
-            bounds[name] = None
-    fit.bounds = bounds
+        bounds[name] = spec.get("bounds", [-np.inf, np.inf])
+
+    fit = FitConfig(
+        model=mcmc.get("model", "PSPL"),
+        **mcmc.get("config", {}),
+        sigma=sigma,
+        fixed=fixed,
+        start=start,
+        bounds=bounds,
+        t_ref=mcmc.get("blobs").get("t_ref", -1),
+        blob_names=mcmc.get("blobs").get("names", []),
+    )
+
     return fit
