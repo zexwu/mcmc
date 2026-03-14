@@ -203,16 +203,16 @@ class SingleLens(Parallax):
 
         return param
 
-    def north_east(
-        self, param: Dict
-    ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    @staticmethod
+    def north_east(param: Dict) -> Tuple[Tuple[float, float], Tuple[float, float]]:
         # Direction of piE source -> lens
         piEN, piEE = param["pi1"], param["pi2"]  # parallax components in EN frame
         piE = np.hypot(piEN, piEE)
         if piE == 0.0:
             return (np.nan, np.nan), (np.nan, np.nan)
 
-        Phi_pi = np.arctan2(piEE, piEN)  # PA of the \mu_LS
+        # PA of the \mu_LS
+        # Phi_pi = np.arctan2(piEE, piEN)
 
         # partial (tau, u) / partial qn -> North
         tau_north, u_north = piEN / piE, -piEE / piE
@@ -327,14 +327,15 @@ class BinaryLens(Parallax):
 
         return y1, y2
 
-    def north_east(
-        self, param: Dict
-    ) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    @staticmethod
+    def north_east(param: Dict) -> Tuple[Tuple[float, float], Tuple[float, float]]:
         # Direction of piE source -> lens
         piEN, piEE = param["pi1"], param["pi2"]  # parallax components in EN frame
         alpha = param["alpha"]  # radians
         calpha, salpha = np.cos(alpha), np.sin(alpha)
-        Phi_pi = np.arctan2(piEE, piEN)  # PA of the \mu_LS
+
+        # PA of the \mu_LS
+        # Phi_pi = np.arctan2(piEE, piEN)
 
         # partial (tau, u) / partial qn -> North
         tau, u = piEN, -piEE
@@ -361,6 +362,15 @@ class BinaryLens(Parallax):
 
 
 class BinaryLensOrb(BinaryLens):
+
+    @staticmethod
+    def beta(param: dict, piS: float = 0.125, thetaE: float = 1) -> float:
+        kappa = 8.144
+        piE = np.hypot(param["pi1"], param["pi2"])
+        gamma2 = (param["ds_dt"] / param["s"]) ** 2 + (param["dalpha_dt"]) ** 2
+        beta = kappa * (365.25**2) / 8 / np.pi**2
+        beta *= piE / thetaE * gamma2 * (param["s"] / (piE + piS / thetaE)) ** 3
+        return beta
 
     def magnification(self, t: NDArray, param: Dict, dataset_id: int = -1) -> NDArray:
         param = self.normalize(param)
