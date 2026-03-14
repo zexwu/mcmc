@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 
 from .io import load_photometry
 from .likelihood import solve_blending_chi2
-from .models import SingleLens, BinaryLens
+import models
 
 parent_path = Path(__file__).parent.parent
 plt.style.use((parent_path / "zexwu.mplstyle").resolve())
@@ -107,7 +107,7 @@ def plot_lightcurve(config_path: str | Path) -> Path:
     if len(coords) != 2:
         raise ValueError("event.coords must be 'RA DEC', e.g. '17:31:42.61 -30:46:17.04'")
 
-    model = globals()[cfg.get("mcmc").get("model")](*coords)
+    model = getattr(models, cfg.get("mcmc").get("model"))(*coords)
     model.precalculate_parallax([ds.data[:, 0] for ds in phot])
 
     # Output files from sampler

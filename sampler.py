@@ -18,7 +18,7 @@ import numpy as np
 from .config import FitConfig, build_fit_config
 from .io import load_photometry, write_csv_with_metadata
 from .likelihood import log_likelihood
-from .models import SingleLens, BinaryLens, BinaryLensOrb
+import models
 from multiprocessing import Pool
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -158,7 +158,7 @@ def fit(config_path: str | Path) -> Results:
     # Fit configuration
     fit_config = build_fit_config(cfg)
 
-    model = globals()[fit_config.model](*coords)
+    model = getattr(models, fit_config.model)(*coords)
 
     # Initialize walkers around starts with Gaussian scatter
     np.random.seed(fit_config.seed)  # for any non-NumPy code that uses global seed
