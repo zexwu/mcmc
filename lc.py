@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 
 from .io import load_photometry
 from .likelihood import solve_blending_chi2
-from .models import PSPL, PSBL
+from .models import SingleLens, BinaryLens
 
 parent_path = Path(__file__).parent.parent
 plt.style.use((parent_path / "zexwu.mplstyle").resolve())

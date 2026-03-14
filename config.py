@@ -81,7 +81,7 @@ def build_fit_config(config: dict) -> FitConfig:
 
     # parameter tables
     start = {k: float(v["start"]) for k, v in params.items()}
-    sigma = {k: float(v["sigma"]) for k, v in params.items()}
+    sigma = {k: v.get("sigma", 0) for k, v in params.items()}
     fixed = [k for k, v in params.items() if v.get("fixed", False)]
 
     bounds: Dict[str, Optional[Tuple[float, float]]] = {}

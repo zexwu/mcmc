@@ -18,7 +18,7 @@ import numpy as np
 from .config import FitConfig, build_fit_config
 from .io import load_photometry, write_csv_with_metadata
 from .likelihood import log_likelihood
-from .models import PSPL, PSBL
+from .models import SingleLens, BinaryLens, BinaryLensOrb
 from multiprocessing import Pool
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)

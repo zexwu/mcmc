@@ -186,7 +186,7 @@ class Parallax:
         return qn_final, qe_final
 
 
-class PSPL(Parallax):
+class SingleLens(Parallax):
     """Point-source/point-lens magnification with optional parallax.
 
     Inherits geometry and parallax trajectory from Parallax; adds the PSPL
@@ -273,7 +273,7 @@ class PSPL(Parallax):
         return dn * thetaE, de * thetaE, eta
 
 
-class PSBL(Parallax):
+class BinaryLens(Parallax):
     """Point-source binary-lens magnification using VBBinaryLensing.
 
     - Provides the same interface as PSPL: `.precalculate_parallax` and
@@ -353,15 +353,36 @@ class PSBL(Parallax):
     def magnification(self, t: NDArray, param: Dict, dataset_id: int = -1) -> NDArray:
         param = self.normalize(param)
         s, q = param["s"], param["q"]
+        s_t = np.ones_like(t) * s
         rho = param["rho"]
         y1, y2 = self.trajectory(t, param, dataset_id)
 
-        return np.array(vbbl.BinaryMag2_vec(s, q, y1, y2, rho))
+        return np.array(vbbl.BinaryMag2_vec(s_t, q, y1, y2, rho))
+
+
+class BinaryLensOrb(BinaryLens):
+
+    def magnification(self, t: NDArray, param: Dict, dataset_id: int = -1) -> NDArray:
+        param = self.normalize(param)
+        s, q = param["s"], param["q"]
+        ds_dt, dalpha_dt = param["ds_dt"], param["dalpha_dt"]
+        rho = param["rho"]
+
+        dt = t - param["t_ref"]
+        dt[(t < param["t_min"]) | (t > param["t_max"])] = 0.0
+
+        s_t = s + ds_dt * dt
+        alpha_t = param["alpha"] + dalpha_dt * dt
+        param_rot = param.copy()
+        param_rot["alpha"] = alpha_t
+
+        y1, y2 = self.trajectory(t, param_rot, dataset_id)
+        return np.array(vbbl.BinaryMag2_vec(s_t, q, y1, y2, rho))
 
 
 if __name__ == "__main__":
     coord = "17:31:42.61 -30:46:17.04"
-    model = PSPL(*coord.split())
+    model = SingleLens(*coord.split())
     t = np.array([10096])
     param = {
         "t0": 10097.7070,
