@@ -99,7 +99,7 @@ def _diag_stats(values, weights=None, mode="weighted"):
     return weighted_quantile(values, [16, 50, 84], weights)
 
 
-def chi2plot(
+def plot_chi2(
     table,
     parameters,
     *,

@@ -62,12 +62,12 @@ def cmd_lc(args) -> int:
 
 
 def cmd_chi2(args) -> int:
-    from .chi2plot import chi2plot
+    from .chi2plot import plot_chi2
 
     names, tab = _load_chain(args.chain)
     params = args.names or [n for n in names if n != "chi2"]
     out = f"{Path(args.chain).with_suffix('')}_chi2.png"
-    chi2plot(tab, parameters=params, colorbar=False, filename=out)
+    plot_chi2(tab, parameters=params, colorbar=False, filename=out)
     print(f"Saved: {out}")
     return 0
 

@@ -239,7 +239,5 @@ def plot_lightcurve(config_path: str | Path) -> Path:
 
     outfile = out_dir / "lc.png"
     fig.savefig(outfile, dpi=200, bbox_inches="tight")
-    backend = matplotlib.get_backend().lower()
-    print(backend)
 
     return outfile
