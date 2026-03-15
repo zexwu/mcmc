@@ -18,10 +18,28 @@ import numpy as np
 from .config import FitConfig, build_fit_config
 from .io import load_photometry, write_csv_with_metadata
 from .likelihood import log_likelihood
-import models
+from . import models
 from multiprocessing import Pool
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+def colored_text(text: str, color: str="white", bold: bool=False) -> str:
+    # Dictionary mapping color names to ANSI codes
+    colors = {
+        "red": "\033[91m", "green": "\033[92m",
+        "yellow": "\033[93m",
+        "blue": "\033[94m",
+        "magenta": "\033[95m",
+        "cyan": "\033[96m",
+        "white": "\033[97m",
+        "reset": "\033[0m"
+    }
+
+    code = colors.get(color.lower(), colors["white"])
+    if bold:
+        return f"\033[1m{code}{text}{colors['reset']}\033[0m"
+    return f"{code}{text}{colors['reset']}"
+
 
 @dataclass
 class Results:
@@ -190,19 +208,21 @@ def fit(config_path: str | Path) -> Results:
         tau = sampler.get_autocorr_time(tol=0, discard=discard)
         tau = np.clip(tau, 1e-8, None)
         rel_err = (np.abs(tau - last_tau) / tau).max()
+        rel_err = np.clip(rel_err, 0, 0.999)
 
         window = fit_config.check_interval
         chain = sampler.get_chain()[-(window+1):]
         accepted = np.any(chain[1:] != chain[:-1], axis=2)
         rolling_af = np.mean(accepted)
+        tau_str = ",".join(f"{x:3.0f}" for x in tau)
 
-        print("\r"+cfg.get("event")+">",
-                f" N= {steps_done};",
-                f" tau= {tau.astype(int)};",
-                f" N/tau= {steps_done / tau.max():4.0f};",
-                f" relerr= {rel_err:.1%};",
-                f" acc= {rolling_af:.1%} ",
-                end="", flush=True)
+        print(colored_text("\r"+cfg.get("event")+">", bold=True),
+              colored_text(f"N={steps_done:5d};", "green"),
+              colored_text(f"tau={tau_str};"),
+              colored_text(f"N/tau={steps_done / tau.max():4.0f};", "blue"),
+              colored_text(f"relerr={rel_err:5.1%};"),
+              colored_text(f"acc={rolling_af:5.1%} ", "green"),
+              end="", flush=True)
         print()
         if _should_stop(tau, last_tau, steps_done, fit_config):
             break

@@ -82,7 +82,7 @@ def write_csv_with_metadata(path: Path, header: List[str], data: np.ndarray, met
         "pi1": "%.5f",
         "pi2": "%.5f",
     }
-    fmt = [formatter.get(col, "%.5e") for col in header]
+    fmt = [formatter.get(col, "%.6e") for col in header]
 
     with open(path, "w", encoding="utf-8") as f:
         for line in metadata:

@@ -19,11 +19,12 @@ from typing import Dict, Tuple
 import toml
 import numpy as np
 
+import matplotlib
 import matplotlib.pyplot as plt
 
 from .io import load_photometry
 from .likelihood import solve_blending_chi2
-import models
+from . import models
 
 parent_path = Path(__file__).parent.parent
 plt.style.use((parent_path / "zexwu.mplstyle").resolve())
@@ -238,4 +239,7 @@ def plot_lightcurve(config_path: str | Path) -> Path:
 
     outfile = out_dir / "lc.png"
     fig.savefig(outfile, dpi=200, bbox_inches="tight")
+    backend = matplotlib.get_backend().lower()
+    print(backend)
+
     return outfile

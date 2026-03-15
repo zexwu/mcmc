@@ -378,7 +378,7 @@ class BinaryLensOrb(BinaryLens):
         ds_dt, dalpha_dt = param["ds_dt"], param["dalpha_dt"]
         rho = param["rho"]
 
-        dt = t - param["t_ref"]
+        dt = t - param["t_kep"]
         dt[(t < param["t_min"]) | (t > param["t_max"])] = 0.0
 
         s_t = s + ds_dt * dt

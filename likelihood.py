@@ -24,8 +24,8 @@ def _get_blob_layout(blob_names: Sequence[str], datasets: List[PhotDataset]) -> 
     fs_pos = [-1] * len(datasets)
     fb_pos = [-1] * len(datasets)
     for i, ds in enumerate(datasets):
-        fs_name = f"fs_{ds.label}"
-        fb_name = f"fb_{ds.label}"
+        fs_name = f"fs_{ds.label}_{ds.filter}"
+        fb_name = f"fb_{ds.label}_{ds.filter}"
         if fs_name in name_to_idx:
             fs_pos[i] = name_to_idx[fs_name]
         if fb_name in name_to_idx:
