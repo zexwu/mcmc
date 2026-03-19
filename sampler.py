@@ -1,6 +1,5 @@
 """Sampling entrypoints and result container.
 
-Public API:
 - fit(path) -> Results
 """
 from __future__ import annotations

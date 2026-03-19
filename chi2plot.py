@@ -5,7 +5,10 @@ from pathlib import Path
 
 
 parent_path = Path(__file__).parent.parent
-plt.style.use((parent_path / "zexwu.mplstyle").resolve())
+try:
+    plt.style.use((parent_path / "zexwu.mplstyle").resolve())
+except Exception as _:
+    pass
 
 tex = {
     "chi2": [r"$\chi^2$", ".1f"],

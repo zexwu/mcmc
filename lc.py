@@ -19,15 +19,17 @@ from typing import Dict, Tuple, Any
 import toml
 import numpy as np
 
-import matplotlib
 import matplotlib.pyplot as plt
 
 from .io import load_photometry
 from .likelihood import solve_blending_chi2
 from . import models
 
-# parent_path = Path(__file__).parent.parent
-# plt.style.use((parent_path / "zexwu.mplstyle").resolve())
+parent_path = Path(__file__).parent.parent
+try:
+     plt.style.use((parent_path / "zexwu.mplstyle").resolve())
+except Exception as _:
+    pass
 
 _COLORS = {
     "KMTC": ("tab:red", 4),
