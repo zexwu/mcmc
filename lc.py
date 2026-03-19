@@ -14,7 +14,7 @@ Usage:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Any
 
 import toml
 import numpy as np
@@ -26,8 +26,8 @@ from .io import load_photometry
 from .likelihood import solve_blending_chi2
 from . import models
 
-parent_path = Path(__file__).parent.parent
-plt.style.use((parent_path / "zexwu.mplstyle").resolve())
+# parent_path = Path(__file__).parent.parent
+# plt.style.use((parent_path / "zexwu.mplstyle").resolve())
 
 _COLORS = {
     "KMTC": ("tab:red", 4),
@@ -99,7 +99,7 @@ def _read_best(best_csv: Path) -> Dict[str, float]:
     return dict(zip(names, arr))
 
 
-def plot_lightcurve(config_path: str | Path) -> Path:
+def plot_lightcurve(config_path: str | Path) -> Any:
     cfg = toml.load(config_path)
     phot = load_photometry(cfg)
 
@@ -118,7 +118,6 @@ def plot_lightcurve(config_path: str | Path) -> Path:
     if not best_file.exists():
         raise FileNotFoundError(f"Best-fit CSV not found: {best_file}")
     best = _read_best(best_file)
-    best = model.normalize(best)
 
     # Reference magnification scaling from first dataset (if available)
     if len(phot) == 0 or len(phot[0].data) == 0:
@@ -135,7 +134,9 @@ def plot_lightcurve(config_path: str | Path) -> Path:
     # Plot datasets
     tmin, tmax = np.inf, -np.inf
     mm = 0.01  # residual scale seed
+    residuals = []
 
+    print()
     for i, ds in enumerate(phot):
         if len(ds.data) == 0:
             continue
@@ -144,20 +145,32 @@ def plot_lightcurve(config_path: str | Path) -> Path:
         tmax = max(tmax, float(t.max()))
 
         mag_model = model.magnification(t, best, dataset_id=i)
-        _, lin = solve_blending_chi2(ds.flux, mag_model, blending=ds.blending)
+
+        chi2, lin = solve_blending_chi2(ds.flux, mag_model, blending=ds.blending)
         fs_i = float(lin[0]) if np.isfinite(lin[0]) else 1.0
         fb_i = float(lin[1]) if np.isfinite(lin[1]) else 0.0
+
+        dof = len(ds.data) - (2 if ds.blending else 1)
+        print(f"{ds.label} {ds.filter}: chi2={chi2:.1f}, chi2/dof={chi2/dof:.2f}, fs={fs_i:.3f}, fb={fb_i:.3f};")
 
         # rescale to reference and convert to magnitudes
         flux_rescaled = _rescale_to_ref(ds.flux, fs_i, fb_i, fs_ref, fb_ref)
         mag_data = _flux_to_mag(flux_rescaled)
         mag_model_rescaled = _flux_to_mag(np.column_stack([t, mag_model * fs_ref + fb_ref, np.zeros_like(t)]))
 
+        if len(ds.data_masked):
+            t_masked = ds.data_masked[:, 0]
+            mag_model_masked = model.magnification(t_masked, best, dataset_id=-1)
+            flux_rescaled_masked = _rescale_to_ref(ds.flux_masked, fs_i, fb_i, fs_ref, fb_ref)
+            mag_data_masked = _flux_to_mag(flux_rescaled_masked)
+            mag_model_rescaled_masked = _flux_to_mag(np.column_stack([t_masked, mag_model_masked * fs_ref + fb_ref, np.zeros_like(t_masked)]))
+
         color, zorder = _get_color(ds.label, i)
         if ds.color: color = ds.color
         if ds.zorder: zorder = ds.zorder
 
-        ebar_kwargs = dict(fmt="o", ms=4, capsize=0, fillstyle="none", mew=1.5, c=color, zorder=zorder, alpha=0.7)
+        ebar_kwargs = dict(fmt="o", ms=4, capsize=0, fillstyle="none", mew=1.5, c=color, zorder=zorder, alpha=0.5)
+        mask_kwargs = dict(fmt="x", ms=4, capsize=0, fillstyle="none", mew=1.5, c=color, zorder=zorder, alpha=0.5)
         for key in ("A", "E"):
             axd[key].errorbar(
                 mag_data[:, 0],
@@ -165,6 +178,8 @@ def plot_lightcurve(config_path: str | Path) -> Path:
                 yerr=np.abs(mag_data[:, 2]),
                 **ebar_kwargs,
             )
+            if len(ds.data_masked):
+                axd[key].errorbar(mag_data_masked[:, 0], mag_data_masked[:, 1], yerr=np.abs(mag_data_masked[:, 2]), **mask_kwargs)
         axd["E"].plot([], [], c=color, label=ds.label + rf" ${ds.filter}$")  # for legend
 
         axd["B"].errorbar(
@@ -174,16 +189,37 @@ def plot_lightcurve(config_path: str | Path) -> Path:
             **ebar_kwargs,
         )
 
+        residuals.append(mag_data[:, 1] - mag_model_rescaled[:, 1])
+        # get outliers for potential masking
+        sigma = abs(mag_data[:, 1] - mag_model_rescaled[:, 1]) / mag_data[:, 2]
+        outliers = sigma > 5
+        # get idx of outliers and add to masked data, concatenating with existing masked data
+        if np.any(outliers):
+            if len(ds.data_masked):
+                outlier_jd = ds.data[outliers, 0]
+                all_jd_masked = np.concatenate([ds.data_masked[:, 0], outlier_jd])
+                all_jd_masked = np.sort(all_jd_masked)
+                all_jd_data = np.concatenate([ds.data[:, 0], ds.data_masked[:, 0]])
+                all_jd_data = np.sort(all_jd_data)
+
+                # get idx of all_jd_masked in all_jd_data
+                idx = np.searchsorted(all_jd_data, all_jd_masked)
+                print(i, ds.label, "outliers:", np.sum(outliers), "total masked:", len(all_jd_masked), "total data:", len(all_jd_data), "idx:", repr(idx.tolist()))
+
+
+        if len(ds.data_masked):
+            axd["B"].errorbar(mag_data_masked[:, 0], mag_data_masked[:, 1] - mag_model_rescaled_masked[:, 1], yerr=np.abs(mag_data_masked[:, 2]), **mask_kwargs)
+
         if i == 0:
             mm = float(np.median(np.abs(mag_data[:, 1] - mag_model_rescaled[:, 1])))
 
     # Model curve over range
-    t0 = best["t0"]
-    tE = best["tE"]
+    t0 = model.normalize(best)["t0"]
+    tE = model.normalize(best)["tE"]
 
     t_ref = cfg.get("mcmc").get("t_ref", np.nan)
 
-    t_model = np.arange(tmin - 0.1 * tE, max(tmax, t_ref) + 0.1 * tE, 0.5)
+    t_model = np.arange(tmin - 0.1 * tE, max(tmax, t_ref) + 0.1 * tE, 1/100)
     mag_curve = _flux_to_mag(np.column_stack([t_model, model.magnification(t_model, best) * fs_ref + fb_ref, np.zeros_like(t_model)]))
 
     for key in ("A", "E"):
@@ -240,4 +276,4 @@ def plot_lightcurve(config_path: str | Path) -> Path:
     outfile = out_dir / "lc.png"
     fig.savefig(outfile, dpi=200, bbox_inches="tight")
 
-    return outfile
+    return fig, axd, residuals, phot

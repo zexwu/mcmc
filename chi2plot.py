@@ -213,7 +213,7 @@ def plot_chi2(
             ax.scatter([], [], c=colors[nsigma - 1 - i], label=rf"$\Delta \chi^2 < {i**2}$")
         legends = ax.legend(loc="center", frameon=False)
         # hide markers and change the color of the text to match the marker color
-        for legobj in legends.legendHandles:
+        for legobj in legends.legend_handles:
             legobj.set_visible(False)
         for text, color in zip(legends.get_texts(), colors[:nsigma]):
             text.set_color(color)

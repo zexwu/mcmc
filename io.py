@@ -3,9 +3,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 import numpy as np
+from numpy.typing import NDArray
 
 
 @dataclass
@@ -15,13 +16,17 @@ class PhotDataset:
     filename: str
     filter: str | None
     blending: bool
-    data: np.ndarray   # columns: time, mag/flux, err
-    flux: np.ndarray   # same shape as data, converted to flux
+
+    data: NDArray   # columns: time, mag/flux, err
+    flux: NDArray   # same shape as data, converted to flux
+
+    data_masked: Optional[NDArray] = None
+    flux_masked: Optional[NDArray] = None
 
     color: Optional[str|None] = None
     zorder: Optional[int] = None
 
-def load_photometry_file(path: str, subtract_jd: bool = True, jd_offset: float = 2450000.0) -> np.ndarray:
+def load_photometry_file(path: str, subtract_jd: bool = True, jd_offset: float = 2450000.0) -> NDArray:
     """Load text photometry with 3 columns; auto-subtract jd_offset if needed."""
     usecols = (1, -2, -1) if str(path).endswith(".pysis5") else (0, 1, 2)
     arr = np.loadtxt(path, usecols=usecols)
@@ -30,7 +35,7 @@ def load_photometry_file(path: str, subtract_jd: bool = True, jd_offset: float =
     return arr
 
 
-def mag_to_flux(arr: np.ndarray, ref_mag: float = 18.0) -> np.ndarray:
+def mag_to_flux(arr: NDArray, ref_mag: float = 18.0) -> np.ndarray:
     """Convert (time, mag, err_mag) to (time, flux, err_flux)."""
     out = arr.copy()
     mag, err = out[:, 1], out[:, 2]
@@ -40,19 +45,19 @@ def mag_to_flux(arr: np.ndarray, ref_mag: float = 18.0) -> np.ndarray:
     return out
 
 
-def load_photometry(cfg: dict, mask: Callable[[np.ndarray], np.ndarray] | None = None) -> list[PhotDataset]:
+def load_photometry(cfg: dict, mask: Callable[[NDArray], np.ndarray] | None = None) -> list[PhotDataset]:
     """Load photometry datasets; filenames are resolved relative to config file."""
     data_dir = Path(cfg.get("input"))
 
-    def _apply_mask(data: np.ndarray, indices) -> np.ndarray:
+    def _apply_mask(data: NDArray, indices) -> Tuple[np.ndarray, np.ndarray]:
         if mask is None and not indices:
-            return data
+            return data, np.array([])
         m = np.zeros(len(data), dtype=bool)
         if mask is not None:
             m |= np.asarray(mask(data), dtype=bool)
         if indices:
             m[np.asarray(indices, dtype=int)] = True
-        return data[~m]
+        return data[~m], data[m]
 
     phot: list[PhotDataset] = []
     for ent in cfg["phot"]:
@@ -64,13 +69,16 @@ def load_photometry(cfg: dict, mask: Callable[[np.ndarray], np.ndarray] | None =
         fpath = data_dir / ent["filename"]
         raw = load_photometry_file(str(fpath), subtract_jd=True, jd_offset=2450000)
         raw[:, 2] = np.sqrt(raw[:, 2] ** 2 + err_floor**2) * err_scale
-        data = _apply_mask(raw, mask_rows)
+        data, data_masked = _apply_mask(raw, mask_rows)
+        flux_masked = np.array([])
 
-        phot.append(PhotDataset(**ent, data=data, flux=mag_to_flux(data)))
+        if len(data_masked):
+            flux_masked = mag_to_flux(data_masked)
+        phot.append(PhotDataset(**ent, data=data, flux=mag_to_flux(data), data_masked=data_masked, flux_masked=flux_masked))
     return phot
 
 
-def write_csv_with_metadata(path: Path, header: List[str], data: np.ndarray, metadata: List[str]):
+def write_csv_with_metadata(path: Path, header: List[str], data: NDArray, metadata: List[str]):
     """Write CSV with metadata and header using fast NumPy I/O for rows."""
     path.parent.mkdir(parents=True, exist_ok=True)
     formatter = {

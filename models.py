@@ -302,6 +302,17 @@ class BinaryLens(Parallax):
         param["s"] = param.get("s", 10 ** param.get("logs", -4))
         if "tE" not in param:
             param["tE"] = abs(param["teff"] / param["u0"])
+
+        if param["s"] > 1:
+            s, q, a = param["s"], param["q"], param["alpha"]
+            t0, u0, tE = param["t0"], param["u0"], param["tE"]
+
+            offset = q / (1 + q) * (s - 1 / s)
+            u0 -= offset * np.sin(a)
+            t0 -= offset * np.cos(a) * tE
+
+            param["t0"], param["u0"] = t0, u0
+
         return param
 
     def trajectory(
