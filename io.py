@@ -31,7 +31,11 @@ class PhotDataset:
 
 def load_photometry_file(path: str, subtract_jd: bool = True, jd_offset: float = 2450000.0) -> NDArray:
     """Load text photometry with 3 columns; auto-subtract jd_offset if needed."""
-    usecols = (1, -2, -1) if str(path).endswith(".pysis5") else (0, 1, 2)
+    usecols = (0, 1, 2)
+    if str(path).endswith(".pysis5"):
+        usecols = (1, -2, -1)
+    if str(path).endswith(".pysis"):
+        usecols = (0, 3, 4)
     arr = np.loadtxt(path, usecols=usecols)
     if subtract_jd and arr.ndim > 0 and arr.shape[0] > 0 and arr[0, 0] > jd_offset:
         arr[:, 0] -= jd_offset

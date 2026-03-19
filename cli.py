@@ -59,8 +59,8 @@ def cmd_run(args) -> int:
 
 def cmd_lc(args) -> int:
     from .lc import plot_lightcurve
-
-    print(f"Saved: {plot_lightcurve(args.config)}")
+    plot_lightcurve(args.config)
+    print("Saved: lc.png")
     return 0
 
 
