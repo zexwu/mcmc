@@ -11,23 +11,23 @@ common reference scale, and produces a 3‑panel figure:
 Usage:
     python -m mcmc.cli lc path/to/config.toml
 """
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Tuple, Any
-
-import toml
-import numpy as np
+from typing import Any, Dict, Tuple
 
 import matplotlib.pyplot as plt
+import numpy as np
+import toml
 
+from . import models
 from .io import load_photometry
 from .likelihood import solve_blending_chi2
-from . import models
 
 parent_path = Path(__file__).parent.parent
 try:
-     plt.style.use((parent_path / "zexwu.mplstyle").resolve())
+    plt.style.use((parent_path / "zexwu.mplstyle").resolve())
 except Exception as _:
     pass
 
@@ -40,22 +40,21 @@ _COLORS = {
 }
 
 _COLORS_LIST = [
-        "black",
-        "r",
-        "blue",
-        "lime",
-        "magenta",
-        "gray",
-        "olivedrab",
-        "darkslategray",
-        "r",
-        "lime",
-        "gold",
-        "r",
-        "black",
-        "darkgreen",
-    ]
-
+    "black",
+    "r",
+    "blue",
+    "lime",
+    "magenta",
+    "gray",
+    "olivedrab",
+    "darkslategray",
+    "r",
+    "lime",
+    "gold",
+    "r",
+    "black",
+    "darkgreen",
+]
 
 
 def _get_color(label: str, idx: int = 0) -> Tuple[str, int]:
@@ -147,7 +146,7 @@ def plot_lightcurve(config_path: str | Path) -> Any:
         tmin = min(tmin, float(t.min()))
         tmax = max(tmax, float(t.max()))
 
-        mag_model = model.magnification(t, best, dataset_id=i)
+        mag_model = model.magnification(t, best, dataset_id=i, a1=ds.a1)
 
         chi2, lin = solve_blending_chi2(ds.flux, mag_model, blending=ds.blending)
         fs_i = float(lin[0]) if np.isfinite(lin[0]) else 1.0
@@ -163,7 +162,7 @@ def plot_lightcurve(config_path: str | Path) -> Any:
 
         if len(ds.data_masked):
             t_masked = ds.data_masked[:, 0]
-            mag_model_masked = model.magnification(t_masked, best, dataset_id=-1)
+            mag_model_masked = model.magnification(t_masked, best, dataset_id=-1, a1=ds.a1)
             flux_rescaled_masked = _rescale_to_ref(ds.flux_masked, fs_i, fb_i, fs_ref, fb_ref)
             mag_data_masked = _flux_to_mag(flux_rescaled_masked)
             mag_model_rescaled_masked = _flux_to_mag(np.column_stack([t_masked, mag_model_masked * fs_ref + fb_ref, np.zeros_like(t_masked)]))
@@ -224,13 +223,11 @@ def plot_lightcurve(config_path: str | Path) -> Any:
 
     t_model = np.arange(tmin - 0.1 * tE, max(tmax, t_ref) + 0.1 * tE, 1 / 100)
     mag_curve = _flux_to_mag(
-        np.column_stack(
-            [
-                t_model,
-                model.magnification(t_model, best) * fs_ref + fb_ref,
-                np.zeros_like(t_model),
-            ]
-        )
+        np.c_[
+            t_model,
+            model.magnification(t_model, best) * fs_ref + fb_ref,
+            np.zeros_like(t_model),
+        ]
     )
 
     for key in ("A", "E"):

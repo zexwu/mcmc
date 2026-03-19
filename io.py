@@ -26,6 +26,7 @@ class PhotDataset:
 
     color: Optional[str] = None
     zorder: Optional[int] = None
+    a1: Optional[float] = -1
 
 
 def load_photometry_file(path: str, subtract_jd: bool = True, jd_offset: float = 2450000.0) -> NDArray:

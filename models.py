@@ -24,9 +24,9 @@ except Exception:  # pragma: no cover
         return func
 
 
-from . import VBBinaryLensing as _VBB
+from . import VBBinaryLensing
 
-vbbl = _VBB.VBBinaryLensing()
+vbbl = VBBinaryLensing.VBBinaryLensing()
 
 
 ECCENTRICITY = 0.0167
@@ -239,7 +239,7 @@ class SingleLens(Parallax):
 
         return tau, u
 
-    def magnification(self, t: NDArray, param: Dict, dataset_id: int = -1) -> NDArray:
+    def magnification(self, t: NDArray, param: Dict, dataset_id: int = -1, a1: float = -1) -> NDArray:
         """Compute PSPL magnification for times t and parameter dict.
 
         Expected keys in param: t0, u0, and either tE or (teff,u0).
@@ -363,13 +363,15 @@ class BinaryLens(Parallax):
 
         return (y1_north, y2_north), (y1_east, y2_east)
 
-    def magnification(self, t: NDArray, param: Dict, dataset_id: int = -1) -> NDArray:
+    def magnification(self, t: NDArray, param: Dict, dataset_id: int = -1, a1: float = -1) -> NDArray:
         param = self.normalize(param)
         s, q = param["s"], param["q"]
         s_t = np.ones_like(t) * s
         rho = param["rho"]
         y1, y2 = self.trajectory(t, param, dataset_id)
 
+        if a1 > 0:
+            vbbl.a1 = a1
         return np.array(vbbl.BinaryMag2_vec(s_t, q, y1, y2, rho))
 
 
@@ -385,7 +387,7 @@ class BinaryLensOrb(BinaryLens):
         beta *= piE / thetaE * gamma2 * (param["s"] / (piE + piS / thetaE)) ** 3
         return beta
 
-    def magnification(self, t: NDArray, param: Dict, dataset_id: int = -1) -> NDArray:
+    def magnification(self, t: NDArray, param: Dict, dataset_id: int = -1, a1: float = -1) -> NDArray:
         param = self.normalize(param)
         s, q = param["s"], param["q"]
         ds_dt, dalpha_dt = param["ds_dt"], param["dalpha_dt"]
@@ -399,6 +401,8 @@ class BinaryLensOrb(BinaryLens):
         param_rot = param.copy()
         param_rot["alpha"] = alpha_t
 
+        if a1 > 0:
+            vbbl.a1 = a1
         y1, y2 = self.trajectory(t, param_rot, dataset_id)
         return np.array(vbbl.BinaryMag2_vec(s_t, q, y1, y2, rho))
 

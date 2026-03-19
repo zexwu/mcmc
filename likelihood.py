@@ -79,7 +79,7 @@ def log_likelihood(
 
     for dataset_id, ds in enumerate(datasets):
         t = ds.data[:, 0]
-        mag = model.magnification(t, params, dataset_id=dataset_id)
+        mag = model.magnification(t, params, dataset_id=dataset_id, a1=ds.a1)
         chi2, lin_params = solve_blending_chi2(ds.flux, mag, blending=ds.blending)
         chi2_total += chi2
         if fs_pos[dataset_id] >= 0:
