@@ -1,0 +1,80 @@
+# Template configuration for a wide microlensing fit.
+# Copy this file and edit the values for your event.
+
+event = "ExampleEvent"
+coords = "17:31:42.61 -30:46:17.04"
+input = "./data"
+output = "./output"
+
+[mcmc]
+# Supported names come from models.py:
+# "SingleLens", "BinaryLens", "BinaryLensOrb"
+model = "BinaryLens"
+
+[mcmc.config]
+temperature = 1.0
+n_processes = 4
+n_walkers = 32
+n_steps = 30000
+seed = 0
+burn_in = 1000
+thin = 1
+check_interval = 1000
+min_tau_mult = 300
+convergence_tol = 0.02
+
+[mcmc.blobs]
+# t_ref is optional, but required if you ask for A_ref in names.
+t_ref = 9500.0
+names = ["A_ref"]
+
+[mcmc.parameters]
+# Core timing parameters
+t0 = { start = 9500.0, sigma = 1.0, fixed = false }
+u0 = { start = 0.20, sigma = 0.02, fixed = false, bounds = [-1.5, 1.5] }
+teff = { start = 20.0, sigma = 1.0, fixed = false, bounds = [0.1, 300.0] }
+
+# Binary-lens parameters
+s = { start = 1.80, sigma = 0.05, fixed = false, bounds = [0.2, 5.0] }
+logq = { start = -2.0, sigma = 0.1, fixed = false, bounds = [-6.0, 0.0] }
+alpha = { start = 0.20, sigma = 0.05, fixed = false, bounds = [-3.2, 3.2] }
+logrho = { start = -3.0, sigma = 0.1, fixed = false, bounds = [-6.0, -1.0] }
+
+# Parallax terms. Set fixed = false to fit them.
+pi1 = { start = 0.0, sigma = 0.02, fixed = true, bounds = [-1.0, 1.0] }
+pi2 = { start = 0.0, sigma = 0.02, fixed = true, bounds = [-1.0, 1.0] }
+
+[mcmc.outputs]
+chain_file = "chain.csv"
+best_file = "best.csv"
+
+[[phot]]
+label = "OGLE"
+filename = "ogle_I.txt"
+filter = "I"
+blending = true
+mask_rows = []
+error_scale = 1.0
+error_floor = 0.0
+
+[[phot]]
+label = "KMTC"
+filename = "kmtc_I.txt"
+filter = "I"
+blending = true
+mask_rows = []
+error_scale = 1.0
+error_floor = 0.0
+
+# Optional plotting overrides
+# color = "tab:red"
+# zorder = 5
+
+[[phot]]
+label = "ZTF"
+filename = "ztf_r.txt"
+filter = "r"
+blending = true
+mask_rows = []
+error_scale = 1.0
+error_floor = 0.0
