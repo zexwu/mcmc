@@ -1,3 +1,5 @@
+"""Public package interface."""
+
 from .sampler import fit
 from .lc import plot_lightcurve
 from .chi2plot import plot_chi2

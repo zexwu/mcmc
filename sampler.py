@@ -1,37 +1,37 @@
-"""Sampling entrypoints and result container.
+"""Sampling entrypoints and result container."""
 
-- fit(path) -> Results
-"""
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
+from multiprocessing import Pool
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
-from numpy.typing import NDArray
-import toml
 import emcee
-import warnings
 import numpy as np
+import toml
+from numpy.typing import NDArray
 
+from . import models
 from .config import FitConfig, build_fit_config
 from .io import load_photometry, write_csv_with_metadata
 from .likelihood import log_likelihood
-from . import models
-from multiprocessing import Pool
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 
-def colored_text(text: str, color: str="white", bold: bool=False) -> str:
-    # Dictionary mapping color names to ANSI codes
+
+def colored_text(text: str, color: str = "white", bold: bool = False) -> str:
+    """Wrap terminal text with ANSI color codes."""
     colors = {
-        "red": "\033[91m", "green": "\033[92m",
+        "red": "\033[91m",
+        "green": "\033[92m",
         "yellow": "\033[93m",
         "blue": "\033[94m",
         "magenta": "\033[95m",
         "cyan": "\033[96m",
         "white": "\033[97m",
-        "reset": "\033[0m"
+        "reset": "\033[0m",
     }
 
     code = colors.get(color.lower(), colors["white"])
@@ -66,6 +66,7 @@ class Results:
 
 
 def _should_stop(tau: np.ndarray | None, last_tau: np.ndarray | None, steps_done: int, cfg: FitConfig) -> bool:
+    """Return whether autocorrelation-based convergence has been reached."""
     if tau is None:
         return False
     if not np.isfinite(tau).all():
@@ -135,23 +136,23 @@ def _initialize_walkers(fit: FitConfig) -> np.ndarray:
     return np.vstack(acc_list)[: fit.n_walkers]
 
 
-# scalar log-prob with emcee-supported blob tuples
 def lnprob(theta: NDArray, datasets: Sequence[Any], model: Any, fit_config: FitConfig):
+    """Evaluate the scalar log-probability for ``emcee``."""
     p = dict(zip(fit_config.free, theta))
     p.update(fit_config.param_fix)
 
     if fit_config.t_ref:
         p["t_ref"] = np.asarray(fit_config.t_ref)
 
-    # flat prior with optional bounds
     null = -np.inf, *tuple(np.nan for _ in fit_config.blob_names)
     for name, b in fit_config.bounds.items():
         if b is None:
             continue
         if not (b[0] <= p[name] <= b[1]):
-            if fit_config.blob_names: return null
+            if fit_config.blob_names:
+                return null
             return -np.inf
-    # also pass bounds into likelihood for internal checking
+
     ll, blob = log_likelihood(p, datasets, model, fit_config.blob_names)
     lp = ll / fit_config.temperature
     return (lp, *blob) if fit_config.blob_names else lp
@@ -181,65 +182,70 @@ def fit(config_path: str | Path) -> Results:
     np.random.seed(fit_config.seed)  # for any non-NumPy code that uses global seed
     p0 = _initialize_walkers(fit_config)
 
-    # Run sampler (scalar lnprob)
     blob_dtype = [(name, float) for name in fit_config.blob_names] if fit_config.blob_names else None
     pool = None
     if fit_config.n_processes > 1:
         pool = Pool(fit_config.n_processes)
-    sampler = emcee.EnsembleSampler(
-        fit_config.n_walkers,
-        fit_config.n_param,
-        lnprob,
-        args=(phot, model, fit_config),
-        blobs_dtype=blob_dtype,
-        moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
-        pool=pool
-    )
+    try:
+        sampler = emcee.EnsembleSampler(
+            fit_config.n_walkers,
+            fit_config.n_param,
+            lnprob,
+            args=(phot, model, fit_config),
+            blobs_dtype=blob_dtype,
+            moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
+            pool=pool,
+        )
 
-    max_steps = fit_config.n_steps
-    state = sampler.run_mcmc(p0, fit_config.check_interval, progress=False)
-    steps_done = fit_config.check_interval
-    last_tau = np.inf
-    while steps_done < max_steps:
-        run = min(fit_config.check_interval, max_steps - steps_done)
-        discard = max(0, steps_done - 3 * fit_config.check_interval)
+        max_steps = fit_config.n_steps
+        state = sampler.run_mcmc(p0, fit_config.check_interval, progress=False)
+        steps_done = fit_config.check_interval
+        last_tau = np.inf
+        while steps_done < max_steps:
+            run = min(fit_config.check_interval, max_steps - steps_done)
+            discard = max(0, steps_done - 3 * fit_config.check_interval)
 
-        tau = sampler.get_autocorr_time(tol=0, discard=discard)
-        tau = np.clip(tau, 1e-8, None)
-        rel_err = (np.abs(tau - last_tau) / tau).max()
-        rel_err = np.clip(rel_err, 0, 0.999)
+            tau = sampler.get_autocorr_time(tol=0, discard=discard)
+            tau = np.clip(tau, 1e-8, None)
+            rel_err = (np.abs(tau - last_tau) / tau).max()
+            rel_err = np.clip(rel_err, 0, 0.999)
 
-        window = fit_config.check_interval
-        chain = sampler.get_chain()[-(window+1):]
-        accepted = np.any(chain[1:] != chain[:-1], axis=2)
-        rolling_af = np.mean(accepted)
-        tau_str = ",".join(f"{x:3.0f}" for x in tau)
+            window = fit_config.check_interval
+            chain = sampler.get_chain()[-(window + 1) :]
+            accepted = np.any(chain[1:] != chain[:-1], axis=2)
+            rolling_af = np.mean(accepted)
+            tau_str = ",".join(f"{x:3.0f}" for x in tau)
 
-        print(colored_text("\r"+cfg.get("event")+">", bold=True),
-              colored_text(f"N={steps_done:5d};", "green"),
-              colored_text(f"tau={tau_str};"),
-              colored_text(f"N/tau={steps_done / tau.max():4.0f};", "blue"),
-              colored_text(f"relerr={rel_err:5.1%};"),
-              colored_text(f"acc={rolling_af:5.1%} ", "green"),
-              end="", flush=True)
-        print()
-        if _should_stop(tau, last_tau, steps_done, fit_config):
-            break
-        if tau is not None and np.isfinite(tau).all():
-            last_tau = tau
+            print(
+                colored_text("\r" + cfg.get("event") + ">", bold=True),
+                colored_text(f"N={steps_done:5d};", "green"),
+                colored_text(f"tau={tau_str};"),
+                colored_text(f"N/tau={steps_done / tau.max():4.0f};", "blue"),
+                colored_text(f"relerr={rel_err:5.1%};"),
+                colored_text(f"acc={rolling_af:5.1%} ", "green"),
+                end="",
+                flush=True,
+            )
+            print()
+            if _should_stop(tau, last_tau, steps_done, fit_config):
+                break
+            if tau is not None and np.isfinite(tau).all():
+                last_tau = tau
 
-        state = sampler.run_mcmc(state, run, progress=False)
-        steps_done += run
+            state = sampler.run_mcmc(state, run, progress=False)
+            steps_done += run
 
-    print("\n")
-    # flatten with burn-in and thinning
-    burn = fit_config.burn_in
-    thin = max(1, fit_config.thin)
-    chain = sampler.get_chain(discard=burn, thin=thin)
-    logp = sampler.get_log_prob(discard=burn, thin=thin)
-    blobs = sampler.get_blobs(discard=burn, thin=thin)
+        print("\n")
+        burn = fit_config.burn_in
+        thin = max(1, fit_config.thin)
+        chain = sampler.get_chain(discard=burn, thin=thin)
+        logp = sampler.get_log_prob(discard=burn, thin=thin)
+        blobs = sampler.get_blobs(discard=burn, thin=thin)
+    finally:
+        if pool is not None:
+            pool.close()
+            pool.join()
 
-    # parameter space samples directly
     W, S, D = chain.shape
     samples = chain.reshape(W * S, D)
     names = fit_config.free

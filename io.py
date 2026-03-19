@@ -1,4 +1,4 @@
-"""Lightweight I/O helpers: config + photometry loading."""
+"""Photometry loading and output helpers."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,20 +11,22 @@ from numpy.typing import NDArray
 
 @dataclass
 class PhotDataset:
-    """Single dataset descriptor with time-series arrays."""
+    """Single photometric dataset and its derived flux arrays."""
+
     label: str
     filename: str
     filter: str | None
     blending: bool
 
-    data: NDArray   # columns: time, mag/flux, err
-    flux: NDArray   # same shape as data, converted to flux
+    data: NDArray  # columns: time, mag/flux, err
+    flux: NDArray  # same shape as data, converted to flux
 
     data_masked: Optional[NDArray] = None
     flux_masked: Optional[NDArray] = None
 
-    color: Optional[str|None] = None
+    color: Optional[str] = None
     zorder: Optional[int] = None
+
 
 def load_photometry_file(path: str, subtract_jd: bool = True, jd_offset: float = 2450000.0) -> NDArray:
     """Load text photometry with 3 columns; auto-subtract jd_offset if needed."""
@@ -46,7 +48,11 @@ def mag_to_flux(arr: NDArray, ref_mag: float = 18.0) -> np.ndarray:
 
 
 def load_photometry(cfg: dict, mask: Callable[[NDArray], np.ndarray] | None = None) -> list[PhotDataset]:
-    """Load photometry datasets; filenames are resolved relative to config file."""
+    """Load photometry datasets from the configuration dictionary.
+
+    The loader keeps the input configuration unchanged and returns one
+    :class:`PhotDataset` per ``cfg["phot"]`` entry.
+    """
     data_dir = Path(cfg.get("input"))
 
     def _apply_mask(data: NDArray, indices) -> Tuple[np.ndarray, np.ndarray]:
@@ -60,8 +66,8 @@ def load_photometry(cfg: dict, mask: Callable[[NDArray], np.ndarray] | None = No
         return data[~m], data[m]
 
     phot: list[PhotDataset] = []
-    for ent in cfg["phot"]:
-
+    for entry in cfg["phot"]:
+        ent = dict(entry)
         err_floor = ent.pop("error_floor", 0.0)
         err_scale = ent.pop("error_scale", 1.0)
         mask_rows = ent.pop("mask_rows", [])
@@ -74,11 +80,19 @@ def load_photometry(cfg: dict, mask: Callable[[NDArray], np.ndarray] | None = No
 
         if len(data_masked):
             flux_masked = mag_to_flux(data_masked)
-        phot.append(PhotDataset(**ent, data=data, flux=mag_to_flux(data), data_masked=data_masked, flux_masked=flux_masked))
+        phot.append(
+            PhotDataset(
+                **ent,
+                data=data,
+                flux=mag_to_flux(data),
+                data_masked=data_masked,
+                flux_masked=flux_masked,
+            )
+        )
     return phot
 
 
-def write_csv_with_metadata(path: Path, header: List[str], data: NDArray, metadata: List[str]):
+def write_csv_with_metadata(path: Path, header: List[str], data: NDArray, metadata: List[str]) -> None:
     """Write CSV with metadata and header using fast NumPy I/O for rows."""
     path.parent.mkdir(parents=True, exist_ok=True)
     formatter = {
@@ -97,4 +111,3 @@ def write_csv_with_metadata(path: Path, header: List[str], data: NDArray, metada
             f.write(f"# {line}\n")
         f.write(",".join(header) + "\n")
         np.savetxt(f, data, delimiter=",", fmt=fmt)
-

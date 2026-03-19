@@ -61,7 +61,8 @@ def _get_projected_sun_pos_njit(t, peri_jd, p, ecc, xpos, ypos, sqrt_term):
     return sun
 
 
-def hms_dms_to_deg(ra_str, dec_str):
+def hms_dms_to_deg(ra_str: str, dec_str: str) -> Tuple[float, float]:
+    """Convert ``HH:MM:SS DD:MM:SS`` coordinates to decimal degrees."""
     ra_h, ra_m, ra_s = [float(x) for x in ra_str.split(":")]
     ra_deg = (ra_h + ra_m / 60.0 + ra_s / 3600.0) * 15.0
     sign = -1.0 if "-" in dec_str else 1.0
@@ -111,7 +112,7 @@ class Parallax:
         self.qes_cache: list[np.ndarray] = []
         self.is_precal = False
 
-    def precalculate_parallax(self, t_list):
+    def precalculate_parallax(self, t_list) -> None:
         """Cache projected Sun positions for each dataset time array."""
         self.qns_cache.clear()
         self.qes_cache.clear()
@@ -373,6 +374,7 @@ class BinaryLens(Parallax):
 
 
 class BinaryLensOrb(BinaryLens):
+    """Binary-lens model with linearized orbital evolution."""
 
     @staticmethod
     def beta(param: dict, piS: float = 0.125, thetaE: float = 1) -> float:

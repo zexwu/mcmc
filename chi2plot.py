@@ -1,7 +1,10 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib as mpl
+"""Chi-squared corner plotting utilities."""
+
 from pathlib import Path
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 parent_path = Path(__file__).parent.parent
@@ -34,19 +37,7 @@ tex = {
 
 
 def weighted_quantile(values, q, weights=None):
-    """
-    Weighted percentile.
-
-    Parameters
-    ----------
-    values : array-like
-    q : array-like in [0, 100]
-    weights : array-like or None
-
-    Returns
-    -------
-    ndarray
-    """
+    """Return weighted percentiles for ``values``."""
     values = np.asarray(values)
     q = np.asarray(q) / 100.0
 
@@ -80,10 +71,7 @@ def _prepare_sample(table, parameters, nsigma, delta):
 
 
 def _layers(arr, nsigma, delta):
-    """
-    Precompute layer masks once.
-    Avoid repeated filtering.
-    """
+    """Precompute nested ``Delta chi2`` layers once."""
     dchi2 = arr[:, 0]
     layers = []
 
@@ -136,7 +124,7 @@ def plot_chi2(
 
     base = layers[0]
     weights = np.exp(-base[:, 0] / (2 * delta))
-    weights /= weights
+    weights /= weights.sum()
 
     # --- Diagonal ---
     for i, p in enumerate(parameters):
@@ -150,7 +138,7 @@ def plot_chi2(
             weights=weights,
             histtype="step",
             color="k",
-            zorder=100
+            zorder=100,
         )
         ax.set_yticks([])
 
@@ -168,7 +156,6 @@ def plot_chi2(
 
         plt.setp(axs[-1][i].xaxis.get_majorticklabels(), rotation=45)
         plt.setp(axs[i][0].yaxis.get_majorticklabels(), rotation=45)
-
 
     # --- Off-diagonal ---
     for i in range(n):
@@ -206,7 +193,7 @@ def plot_chi2(
         fig.colorbar(
             mpl.cm.ScalarMappable(norm=norm, cmap=cmap),
             ax=axs,
-            location="right"
+            location="right",
         )
     else:
         ax = axs[0, -1]

@@ -102,6 +102,7 @@ def _read_best(best_csv: Path) -> Dict[str, float]:
 
 
 def plot_lightcurve(config_path: str | Path) -> Any:
+    """Plot the best-fit light curve and residual panels for a config file."""
     cfg = toml.load(config_path)
     phot = load_photometry(cfg)
 
@@ -221,8 +222,16 @@ def plot_lightcurve(config_path: str | Path) -> Any:
 
     t_ref = cfg.get("mcmc").get("t_ref", np.nan)
 
-    t_model = np.arange(tmin - 0.1 * tE, max(tmax, t_ref) + 0.1 * tE, 1/100)
-    mag_curve = _flux_to_mag(np.column_stack([t_model, model.magnification(t_model, best) * fs_ref + fb_ref, np.zeros_like(t_model)]))
+    t_model = np.arange(tmin - 0.1 * tE, max(tmax, t_ref) + 0.1 * tE, 1 / 100)
+    mag_curve = _flux_to_mag(
+        np.column_stack(
+            [
+                t_model,
+                model.magnification(t_model, best) * fs_ref + fb_ref,
+                np.zeros_like(t_model),
+            ]
+        )
+    )
 
     for key in ("A", "E"):
         axd[key].plot(t_model, mag_curve[:, 1], lw=1, c="tab:cyan", zorder=100)
@@ -266,7 +275,7 @@ def plot_lightcurve(config_path: str | Path) -> Any:
         handlelength=0,      # no line/marker handle
         handletextpad=0,     # no extra space before text
         ncol=2,
-        labelcolor='linecolor'
+        labelcolor="linecolor",
     )
 
     fig.align_labels()

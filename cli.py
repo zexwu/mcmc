@@ -1,3 +1,5 @@
+"""Command-line interface for the package."""
+
 from __future__ import annotations
 
 import argparse
@@ -33,6 +35,7 @@ def _print_summary(res) -> None:
 
 
 def _load_chain(path: str):
+    """Load a metadata-prefixed CSV chain file into a named record array."""
     import numpy as np
 
     with open(path, encoding="utf-8") as f:
@@ -73,6 +76,7 @@ def cmd_chi2(args) -> int:
 
 
 def make_parser() -> argparse.ArgumentParser:
+    """Build the top-level CLI parser."""
     p = argparse.ArgumentParser(
         prog="microlens-mcmc",
         description="Fit microlensing lightcurves with emcee",

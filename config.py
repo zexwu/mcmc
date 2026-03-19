@@ -1,22 +1,32 @@
-"""Tiny config mapping for microlens_mcmc.
+"""Configuration helpers for sampler setup.
 
-Reads a TOML dict (already loaded) and returns a minimal FitConfig.
-Supports either flat `[mcmc]` keys or legacy `[mcmc.config]`.
-Flat priors only, with optional simple bounds.
+The public entrypoint is :func:`build_fit_config`, which converts a loaded
+TOML configuration dictionary into a normalized :class:`FitConfig`.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+
 import numpy as np
 
 
 @dataclass
 class FitConfig:
-    """Minimal container for sampler knobs and parameter tables.
+    """Normalized sampler configuration.
 
-    Use `.free` for the ordered free-parameter names and `.fixed_values`
-    for a dict of fixed names to values.
+    Attributes
+    ----------
+    model
+        Model class name from :mod:`mcmc.models`.
+    sigma
+        Proposal scales keyed by parameter name.
+    fixed
+        Names of fixed parameters.
+    start
+        Starting values keyed by parameter name.
+    blob_names
+        Optional sampler blob names to persist in outputs.
     """
 
     # model name (e.g. "PSPL", "PSBL")
@@ -43,13 +53,11 @@ class FitConfig:
     min_tau_mult: int = 200
     convergence_tol: float = 0.01
 
-    # internal ordering of free parameters (derived from step_sizes keys)
-    _fit_order: List[str] = field(init=False, repr=False)
     # optional simple bounds per parameter (flat prior inside, -inf outside)
     bounds: Dict[str, Optional[Tuple[float, float]]] = field(default_factory=dict)
 
-    def __post_init__(self):
-        # Normalize inputs and capture a stable free-parameter order.
+    def __post_init__(self) -> None:
+        """Normalize mutable inputs and derive free-parameter order."""
         self.sigma = dict(self.sigma)
         self.start = dict(self.start)
         self.fixed = list(self.fixed)
@@ -73,11 +81,10 @@ class FitConfig:
 
 
 def build_fit_config(config: dict) -> FitConfig:
-    """Build FitConfig from a loaded TOML dict.
-
-    """
+    """Build :class:`FitConfig` from a loaded TOML dictionary."""
     mcmc = config.get("mcmc", {})
-    params = mcmc.get("parameters")
+    params = mcmc.get("parameters", {})
+    blobs = mcmc.get("blobs", {})
 
     # parameter tables
     start = {k: float(v["start"]) for k, v in params.items()}
@@ -95,8 +102,8 @@ def build_fit_config(config: dict) -> FitConfig:
         fixed=fixed,
         start=start,
         bounds=bounds,
-        t_ref=mcmc.get("blobs").get("t_ref", -1),
-        blob_names=mcmc.get("blobs").get("names", []),
+        t_ref=blobs.get("t_ref", -1),
+        blob_names=blobs.get("names", []),
     )
 
     return fit
