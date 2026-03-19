@@ -1,4 +1,4 @@
-"""Sampling entrypoints and result container."""
+"""MCMC sampling entrypoints and result container."""
 
 from __future__ import annotations
 
@@ -158,7 +158,7 @@ def lnprob(theta: NDArray, datasets: Sequence[Any], model: Any, fit_config: FitC
     return (lp, *blob) if fit_config.blob_names else lp
 
 
-def fit(config_path: str | Path) -> Results:
+def mcmc(config_path: str | Path) -> Results:
     """Run emcee on a configuration file and return Results.
 
     The function is dependency-light and prints no plots. See README for

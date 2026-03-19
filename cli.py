@@ -3,35 +3,31 @@
 from __future__ import annotations
 
 import argparse
+import math
 from pathlib import Path
 
 
-def _fmt_pm(m: float, p16: float, p84: float) -> str:
-    du = max(0.0, p84 - m)
-    dl = max(0.0, m - p16)
-    if not (du or dl):
-        return f"{m:.6g}"
-
-    import math
-
-    u = max(du, dl)
-    prec = 6 if u == 0 else min(max(0, 1 - math.floor(math.log10(u))), 8)
-    fmt = f"{{:.{prec}f}}"
-    return f"{fmt.format(m)} +{fmt.format(du)} -{fmt.format(dl)}"
-
-
 def _print_summary(res) -> None:
-    s = res.summary()
-    rows = [("chi2_best", f"{s['chi2_best']['value']:.3f}")]
-    rows += [
-        (name, _fmt_pm(q["median"], q["p16"], q["p84"]))
-        for name in res.param_names
-        for q in [s[name]]
-    ]
-    wk = max(len(k) for k, _ in rows)
-    wv = max(len(v) for _, v in rows)
-    for k, v in rows:
-        print(f"{k:<{wk}} = {v:>{wv}}")
+    summary = res.summary()
+    rows = [("chi2_best", f"{summary['chi2_best']['value']:.3f}")]
+    for name in res.param_names:
+        q = summary[name]
+        median = q["median"]
+        upper = max(0.0, q["p84"] - median)
+        lower = max(0.0, median - q["p16"])
+        if upper or lower:
+            scale = max(upper, lower)
+            prec = 6 if scale == 0 else min(max(0, 1 - math.floor(math.log10(scale))), 8)
+            fmt = f"{{:.{prec}f}}"
+            value = f"{fmt.format(median)} +{fmt.format(upper)} -{fmt.format(lower)}"
+        else:
+            value = f"{median:.6g}"
+        rows.append((name, value))
+
+    key_width = max(len(key) for key, _ in rows)
+    value_width = max(len(value) for _, value in rows)
+    for key, value in rows:
+        print(f"{key:<{key_width}} = {value:>{value_width}}")
 
 
 def _load_chain(path: str):
@@ -50,15 +46,23 @@ def _load_chain(path: str):
     return names, np.rec.fromarrays(arr.T, names=",".join(names))
 
 
-def cmd_run(args) -> int:
-    from .sampler import fit
+def cmd_fit(args) -> int:
+    from .fit import fit
 
-    _print_summary(fit(args.config))
+    print(f"Saved: {fit(args.config)}")
+    return 0
+
+
+def cmd_run(args) -> int:
+    from .sampler import mcmc
+
+    _print_summary(mcmc(args.config))
     return 0
 
 
 def cmd_lc(args) -> int:
     from .lc import plot_lightcurve
+
     plot_lightcurve(args.config)
     print("Saved: lc.png")
     return 0
@@ -77,26 +81,30 @@ def cmd_chi2(args) -> int:
 
 def make_parser() -> argparse.ArgumentParser:
     """Build the top-level CLI parser."""
-    p = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         prog="microlens-mcmc",
         description="Fit microlensing lightcurves with emcee",
     )
-    sp = p.add_subparsers(required=True)
+    subparsers = parser.add_subparsers(required=True)
 
-    run = sp.add_parser("run", help="Run MCMC from TOML config")
-    run.add_argument("config", help="Path to conf.toml")
-    run.set_defaults(func=cmd_run)
+    fit_parser = subparsers.add_parser("fit", help="Pre-fit with outlier rejection and write cleaned TOML")
+    fit_parser.add_argument("config", help="Path to conf.toml")
+    fit_parser.set_defaults(func=cmd_fit)
 
-    lc = sp.add_parser("lc", help="Plot lightcurve from TOML config")
-    lc.add_argument("config", help="Path to conf.toml")
-    lc.set_defaults(func=cmd_lc)
+    run_parser = subparsers.add_parser("run", help="Run MCMC from TOML config")
+    run_parser.add_argument("config", help="Path to conf.toml")
+    run_parser.set_defaults(func=cmd_run)
 
-    chi2 = sp.add_parser("chi2", help="Plot chi2 surface from chain.csv")
+    lc_parser = subparsers.add_parser("lc", help="Plot lightcurve from TOML config")
+    lc_parser.add_argument("config", help="Path to conf.toml")
+    lc_parser.set_defaults(func=cmd_lc)
+
+    chi2 = subparsers.add_parser("chi2", help="Plot chi2 surface from chain.csv")
     chi2.add_argument("chain", help="Path to chain.csv")
     chi2.add_argument("--names", nargs="*", help="parameter names to plot")
     chi2.set_defaults(func=cmd_chi2)
 
-    return p
+    return parser
 
 
 def main(argv: list[str] | None = None) -> int:
