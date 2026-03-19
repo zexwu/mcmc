@@ -234,11 +234,6 @@ def plot_lightcurve(config_path: str | Path) -> Any:
         axd[key].plot(t_model, mag_curve[:, 1], lw=1, c="tab:cyan", zorder=100)
     axd["B"].axhline(0.0, c="tab:cyan", lw=1, zorder=100)
 
-    # Axes limits
-    ymin, ymax = float(np.max(mag_curve[:, 1])) + 0.2, float(np.min(mag_curve[:, 1])) - 0.2
-    axd["A"].set_ylim(ymin, ymax)
-    axd["E"].set_ylim(ymin + 0.1, ymax - 0.1)
-
     # Zoom window around peak and around t_ref
     t_min = max(t0 - 3 * tE, t_ref - 360)
     t_max = min(t0 + tE, t_ref + 120)
@@ -250,6 +245,13 @@ def plot_lightcurve(config_path: str | Path) -> Any:
     axd["A"].set_xlim(t_min, t_max)
     axd["B"].set_xlim(t_min, t_max)
     axd["B"].set_ylim((mm * 5, -mm * 5) if mm * 5 > 0.05 else (0.06, -0.06))
+
+    # Axes limits
+    ymin, ymax = mag_curve[:, 1].max() + 0.2, mag_curve[:, 1].min() - 0.2
+    axd["E"].set_ylim(ymin, ymax)
+    mag_curve_zoom = mag_curve[(mag_curve[:, 0] >= t_min) & (mag_curve[:, 0] <= t_max)]
+    ymin, ymax = mag_curve_zoom[:, 1].max() + 0.1, mag_curve_zoom[:, 1].min() - 0.1
+    axd["A"].set_ylim(ymin, ymax)
 
     # Labels, title, legend
     axd["E"].set_ylabel(f"${phot[0].filter}$ mag")
