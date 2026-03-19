@@ -219,7 +219,7 @@ def plot_lightcurve(config_path: str | Path) -> Any:
     t0 = model.normalize(best)["t0"]
     tE = model.normalize(best)["tE"]
 
-    t_ref = cfg.get("mcmc").get("t_ref", np.nan)
+    t_ref = cfg.get("mcmc").get("blobs").get("t_ref", np.nan)
 
     t_model = np.arange(tmin - 0.1 * tE, max(tmax, t_ref) + 0.1 * tE, 1 / 100)
     mag_curve = _flux_to_mag(

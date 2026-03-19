@@ -96,7 +96,7 @@ def plot_chi2(
     *,
     nsigma=4,
     delta=1.0,
-    bins=30,
+    bins=25,
     stat="percentile",
     colors=("red", "gold", "limegreen", "blue"),
     tex=tex,
