@@ -235,7 +235,6 @@ def mcmc(config_path: str | Path) -> Results:
             state = sampler.run_mcmc(state, run, progress=False)
             steps_done += run
 
-        print("\n")
         burn = fit_config.burn_in
         thin = max(1, fit_config.thin)
         chain = sampler.get_chain(discard=burn, thin=thin)

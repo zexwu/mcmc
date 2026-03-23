@@ -44,7 +44,7 @@ def weighted_quantile(values, q, weights=None):
     q = np.asarray(q) / 100.0
 
     if weights is None:
-        return np.percentile(values, q * 100)
+        return np.nanpercentile(values, q * 100)
 
     weights = np.asarray(weights)
     sorter = np.argsort(values)
@@ -86,7 +86,7 @@ def _layers(arr, nsigma, delta):
 
 def _diag_stats(values, weights=None, mode="weighted"):
     if mode == "percentile":
-        return np.percentile(values, [16, 50, 84])
+        return np.nanpercentile(values, [16, 50, 84])
     if mode == "mid":
         return np.array([values.min(), values.mean(), values.max()])
     return weighted_quantile(values, [16, 50, 84], weights)
