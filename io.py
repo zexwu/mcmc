@@ -37,8 +37,13 @@ def load_photometry_file(path: str, subtract_jd: bool = True, jd_offset: float =
     if str(path).endswith(".pysis"):
         usecols = (0, 3, 4)
     arr = np.loadtxt(path, usecols=usecols)
-    if subtract_jd and arr.ndim > 0 and arr.shape[0] > 0 and arr[0, 0] > jd_offset:
+    if subtract_jd and arr.ndim > 1 and arr.shape[0] > 0 and arr[0, 0] > jd_offset:
         arr[:, 0] -= jd_offset
+
+    if str(path).endswith(".diapl"):
+        arr[:, 0] -= 50000.5 - 1
+        arr = arr[arr[:, 0] > 10650]
+
     return arr
 
 
@@ -81,15 +86,22 @@ def load_photometry(cfg: dict, mask: Callable[[NDArray], np.ndarray] | None = No
         raw = load_photometry_file(str(fpath), subtract_jd=True, jd_offset=2450000)
         raw[:, 2] = np.sqrt(raw[:, 2] ** 2 + err_floor**2) * err_scale
         data, data_masked = _apply_mask(raw, mask_rows)
+
+        flux = mag_to_flux(data)
         flux_masked = np.array([])
 
         if len(data_masked):
             flux_masked = mag_to_flux(data_masked)
+
+        if "diapl" in ent["filename"]:
+            flux = data
+            flux_masked = data_masked
+
         phot.append(
             PhotDataset(
                 **ent,
                 data=data,
-                flux=mag_to_flux(data),
+                flux=flux,
                 data_masked=data_masked,
                 flux_masked=flux_masked,
             )

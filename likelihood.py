@@ -24,6 +24,8 @@ def _get_blob_layout(blob_names: Sequence[str], datasets: List[PhotDataset]) -> 
     fs_pos = [-1] * len(datasets)
     fb_pos = [-1] * len(datasets)
     for i, ds in enumerate(datasets):
+        if "diapl" in ds.filename: continue
+
         fs_name = f"fs_{ds.label}_{ds.filter}"
         fb_name = f"fb_{ds.label}_{ds.filter}"
         if fs_name in name_to_idx:
@@ -44,7 +46,7 @@ def solve_blending_chi2(data_flux: np.ndarray, model: np.ndarray, blending: bool
         AtA = A.T @ A
         det = AtA[0, 0] * AtA[1, 1] - AtA[0, 1] * AtA[1, 0]
         if abs(det) < 1e-20:
-            return 1e16, np.array([0.0, 0.0])
+            return 1e16, np.array([1.0, 0.0])
         inv_det = 1.0 / det
         inv_AtA = np.empty((2, 2), dtype=A.dtype)
         inv_AtA[0, 0] = AtA[1, 1] * inv_det
@@ -58,6 +60,8 @@ def solve_blending_chi2(data_flux: np.ndarray, model: np.ndarray, blending: bool
     else:
         model_norm = model * inv_err
         dot_mm = float(model_norm @ model_norm)
+        if dot_mm < 1e-20:
+            return 1e16, np.array([1.0, 0.0])
         fs = float(model_norm @ y_norm) / dot_mm
         resid = y_norm - fs * model_norm
         chi2 = float(resid @ resid)
@@ -80,12 +84,29 @@ def log_likelihood(
     for dataset_id, ds in enumerate(datasets):
         t = ds.data[:, 0]
         mag = model.magnification(t, params, dataset_id=dataset_id, a1=ds.a1)
-        chi2, lin_params = solve_blending_chi2(ds.flux, mag, blending=ds.blending)
-        chi2_total += chi2
+        chi2, (fs, fb) = solve_blending_chi2(ds.flux, mag, blending=ds.blending)
+        fbase = fs + fb
+
         if fs_pos[dataset_id] >= 0:
-            blob[fs_pos[dataset_id]] = float(lin_params[0])
+            blob[fs_pos[dataset_id]] = fs
         if fb_pos[dataset_id] >= 0:
-            blob[fb_pos[dataset_id]] = float(lin_params[1])
+            blob[fb_pos[dataset_id]] = fb
+
+        # mild penalty only; do not kill walkers
+        penalty = 0
+        if fbase <= 0:
+            penalty += 20.0
+        else:
+            neg_blend = max(-fb / fbase - 0.1, 0.0)   # allow 10% negative blending
+            penalty += 2.0 * neg_blend / 0.1          # linear penalty
+
+        if fs < 0:
+            penalty += 2.0 * (-fs) / 0.01
+
+        if "diapl" in ds.filename:
+            penalty = 0
+
+        chi2_total += chi2 + penalty
 
     if idx_Aref >= 0:
         blob[idx_Aref] = model.magnification(params["t_ref"], params, dataset_id=-1)

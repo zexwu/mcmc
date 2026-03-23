@@ -32,6 +32,7 @@ except Exception as _:
     pass
 
 _COLORS = {
+    "diapl": ("k", 1),
     "KMTC": ("tab:red", 4),
     "KMTA": ("tab:green", 2),
     "KMTS": ("tab:blue", 3),
@@ -137,8 +138,9 @@ def plot_lightcurve(config_path: str | Path) -> Any:
     tmin, tmax = np.inf, -np.inf
     mm = 0.01  # residual scale seed
     residuals = []
+    chi2tot = 0.0
+    offset = 10000
 
-    print()
     for i, ds in enumerate(phot):
         if len(ds.data) == 0:
             continue
@@ -149,10 +151,12 @@ def plot_lightcurve(config_path: str | Path) -> Any:
         mag_model = model.magnification(t, best, dataset_id=i, a1=ds.a1)
 
         chi2, lin = solve_blending_chi2(ds.flux, mag_model, blending=ds.blending)
+        chi2tot += chi2
         fs_i = float(lin[0]) if np.isfinite(lin[0]) else 1.0
         fb_i = float(lin[1]) if np.isfinite(lin[1]) else 0.0
 
         dof = len(ds.data) - (2 if ds.blending else 1)
+        dof = np.clip(dof, 1, None)
         print(f"{ds.label} {ds.filter}: chi2={chi2:.1f}, chi2/dof={chi2/dof:.2f}, fs={fs_i:.3f}, fb={fb_i:.3f};")
 
         # rescale to reference and convert to magnitudes
@@ -170,22 +174,23 @@ def plot_lightcurve(config_path: str | Path) -> Any:
         color, zorder = _get_color(ds.label, i)
         if ds.color: color = ds.color
         if ds.zorder: zorder = ds.zorder
+        if "diapl" in ds.filename: color="k"
 
         ebar_kwargs = dict(fmt="o", ms=4, capsize=0, fillstyle="none", mew=1.5, c=color, zorder=zorder, alpha=0.5)
-        mask_kwargs = dict(fmt="x", ms=4, capsize=0, fillstyle="none", mew=1.5, c=color, zorder=zorder, alpha=0.5)
+        mask_kwargs = dict(fmt="x", ms=4, capsize=0, fillstyle="none", mew=1.5, c=color, zorder=zorder, alpha=0.2)
         for key in ("A", "E"):
             axd[key].errorbar(
-                mag_data[:, 0],
+                mag_data[:, 0] - offset,
                 mag_data[:, 1],
                 yerr=np.abs(mag_data[:, 2]),
                 **ebar_kwargs,
             )
             if len(ds.data_masked):
-                axd[key].errorbar(mag_data_masked[:, 0], mag_data_masked[:, 1], yerr=np.abs(mag_data_masked[:, 2]), **mask_kwargs)
+                axd[key].errorbar(mag_data_masked[:, 0] - offset, mag_data_masked[:, 1], yerr=np.abs(mag_data_masked[:, 2]), **mask_kwargs)
         axd["E"].plot([], [], c=color, label=ds.label + rf" ${ds.filter}$")  # for legend
 
         axd["B"].errorbar(
-            mag_data[:, 0],
+            mag_data[:, 0] - offset,
             mag_data[:, 1] - mag_model_rescaled[:, 1],
             yerr=np.abs(mag_data[:, 2]),
             **ebar_kwargs,
@@ -210,10 +215,11 @@ def plot_lightcurve(config_path: str | Path) -> Any:
 
 
         if len(ds.data_masked):
-            axd["B"].errorbar(mag_data_masked[:, 0], mag_data_masked[:, 1] - mag_model_rescaled_masked[:, 1], yerr=np.abs(mag_data_masked[:, 2]), **mask_kwargs)
+            axd["B"].errorbar(mag_data_masked[:, 0] - offset, mag_data_masked[:, 1] - mag_model_rescaled_masked[:, 1], yerr=np.abs(mag_data_masked[:, 2]), **mask_kwargs)
 
         if i == 0:
             mm = float(np.median(np.abs(mag_data[:, 1] - mag_model_rescaled[:, 1])))
+    print(f"chi2tot: {chi2tot:.2f}")
 
     # Model curve over range
     t0 = model.normalize(best)["t0"]
@@ -231,19 +237,19 @@ def plot_lightcurve(config_path: str | Path) -> Any:
     )
 
     for key in ("A", "E"):
-        axd[key].plot(t_model, mag_curve[:, 1], lw=1, c="tab:cyan", zorder=100)
+        axd[key].plot(t_model - offset, mag_curve[:, 1], lw=1, c="tab:cyan", zorder=100)
     axd["B"].axhline(0.0, c="tab:cyan", lw=1, zorder=100)
 
     # Zoom window around peak and around t_ref
-    t_min = max(t0 - 3 * tE, t_ref - 360)
-    t_max = min(t0 + tE, t_ref + 120)
+    t_min = max(t0 - 3 * tE, t_ref - 120)
+    t_max = min(t0 + tE, t_ref + 60)
     # expand to include first dataset coverage loosely
     if np.isfinite(t_ref):
         t_min = min(t_min, t_ref - 30)
         t_max = max(t_max, t_ref + 15)
 
-    axd["A"].set_xlim(t_min, t_max)
-    axd["B"].set_xlim(t_min, t_max)
+    axd["A"].set_xlim(t_min - offset, t_max - offset)
+    axd["B"].set_xlim(t_min - offset, t_max - offset)
     axd["B"].set_ylim((mm * 5, -mm * 5) if mm * 5 > 0.05 else (0.06, -0.06))
 
     # Axes limits
@@ -257,7 +263,7 @@ def plot_lightcurve(config_path: str | Path) -> Any:
     axd["E"].set_ylabel(f"${phot[0].filter}$ mag")
     axd["A"].set_ylabel(f"${phot[0].filter}$ mag")
     axd["B"].set_ylabel("Residual")
-    axd["B"].set_xlabel("HJD $-$ 2450000")
+    axd["B"].set_xlabel(f"HJD $-$ {2450000+offset:.0f}")
     axd["A"].sharex(axd["B"])
     axd["A"].tick_params(axis="x", which="both", bottom=True, labelbottom=False)
 
@@ -269,7 +275,7 @@ def plot_lightcurve(config_path: str | Path) -> Any:
 
     if np.isfinite(t_ref):
         for key in ("A", "E"):
-            axd[key].axvline(t_ref, c="r")
+            axd[key].axvline(t_ref - offset, c="r")
     axd["E"].legend(
         handlelength=0,      # no line/marker handle
         handletextpad=0,     # no extra space before text

@@ -70,10 +70,14 @@ def _bounds_from_config(fit_config: FitConfig) -> tuple[np.ndarray, np.ndarray]:
 def _dataset_residuals(ds, mag: np.ndarray) -> np.ndarray:
     """Return normalized flux residuals after solving linear blending terms."""
     _, lin_params = solve_blending_chi2(ds.flux, mag, blending=ds.blending)
-    fs = float(lin_params[0]) if np.isfinite(lin_params[0]) else 1.0
-    fb = float(lin_params[1]) if np.isfinite(lin_params[1]) else 0.0
-    model_flux = fs * mag + fb
-    return (ds.flux[:, 1] - model_flux) / ds.flux[:, 2]
+    if np.isfinite(lin_params).all():
+        fs, fb = lin_params
+        model_flux = fs * mag + fb
+        resid = (ds.flux[:, 1] - model_flux) / ds.flux[:, 2]
+        return resid
+    else:
+        return np.zeros(len(ds.data), dtype=float)
+
 
 
 def _all_residuals(theta: np.ndarray, fit_config: FitConfig, phot, model, masks: list[np.ndarray]) -> np.ndarray:
@@ -97,13 +101,15 @@ def _fit_theta(fit_config: FitConfig, phot, model, masks: list[np.ndarray], thet
     result = least_squares(
         _all_residuals,
         theta0,
+        jac='2-point',
         bounds=(lower, upper),
         args=(fit_config, phot, model, masks),
+        max_nfev=2000,
     )
     return result.x
 
 
-def _outlier_rows(cfg: dict, phot, masks: list[np.ndarray]) -> list[list[int]]:
+def _outlier_rows(cfg: dict, masks: list[np.ndarray]) -> list[list[int]]:
     """Convert local boolean masks back to raw ``mask_rows`` indices per dataset."""
     input_dir = Path(cfg.get("input"))
     rows: list[list[int]] = []
@@ -198,13 +204,17 @@ def _reject_outliers(fit_config: FitConfig, phot, model, sigma: float, maxiters:
             mag = model.magnification(ds.data[:, 0], params, dataset_id=dataset_id, a1=ds.a1)
             resid = _dataset_residuals(ds, mag)
             # Clip on normalized flux residuals after the current best fit.
-            new_mask = masks[dataset_id] | (np.abs(resid) > sigma)
+            chi2_per_point = (resid[~masks[dataset_id]] ** 2).mean()
+            new_mask = masks[dataset_id] | (resid ** 2 / chi2_per_point > sigma ** 2)
             if not np.array_equal(new_mask, masks[dataset_id]):
                 masks[dataset_id] = new_mask
                 changed = True
 
         if not changed:
             break
+    for dataset_id, ds in enumerate(phot):
+        if "diapl" in ds.filename: continue
+        masks[dataset_id] |= (ds.data[:, 2]) > 0.2
 
     return theta, masks
 
@@ -232,7 +242,7 @@ def fit(
 
     theta, masks = _reject_outliers(fit_config, phot, model, sigma, maxiters)
     best_params = _params_from_theta(theta, fit_config)
-    outliers = _outlier_rows(cfg, phot, masks)
+    outliers = _outlier_rows(cfg, masks)
     error_scales = _updated_error_scales(cfg, phot, model, masks, best_params)
 
     destination = Path(output_path) if output_path is not None else _default_output_path(config_path)
