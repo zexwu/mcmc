@@ -5,13 +5,9 @@ Lightweight microlensing fitting tools built around `emcee`.
 ## Install
 
 ```bash
-pip install numpy matplotlib emcee toml
+pip install numpy matplotlib emcee toml numba
 ```
 
-Optional:
-
-- `numba` for faster parallax utilities
-- bundled `VBBinaryLensing` for binary-lens magnification
 
 ## Quick start
 
